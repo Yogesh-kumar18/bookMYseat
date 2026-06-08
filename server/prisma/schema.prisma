@@ -1,0 +1,373 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  STUDENT
+  OWNER
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum LibraryStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum BookingStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  WAITLISTED
+  CANCELLED
+}
+
+enum MembershipStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  OVERDUE
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  HALF_DAY
+}
+
+enum NotificationType {
+  BOOKING
+  COMPLAINT
+  FEE_REMINDER
+  ANNOUNCEMENT
+  MEMBERSHIP
+  SYSTEM
+}
+
+enum ComplaintStatus {
+  PENDING
+  IN_REVIEW
+  RESOLVED
+}
+
+enum GroupBookingStatus {
+  INVITING
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+model User {
+  id                    String                 @id @default(cuid())
+  name                  String
+  email                 String                 @unique
+  phone                 String?                @unique
+  passwordHash          String
+  role                  Role                   @default(STUDENT)
+  status                UserStatus             @default(ACTIVE)
+  isPro                 Boolean                @default(false)
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  libraries             Library[]              @relation("LibraryOwner")
+  memberships           StudentMembership[]
+  bookings              Booking[]
+  reviews               Review[]
+  notifications         Notification[]
+  studySessions         StudySession[]
+  studyStreak           StudyStreak?
+  favorites             Favorite[]
+  tasks                 Task[]
+  complaints            Complaint[]
+  ledGroups             GroupBooking[]         @relation("GroupLeader")
+  groupMemberships      GroupBookingMember[]
+  passwordResets        PasswordResetToken[]
+  notificationPrefs     UserNotificationPrefs?
+}
+
+model Library {
+  id             String              @id @default(cuid())
+  ownerId        String?
+  owner          User?               @relation("LibraryOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  name           String
+  slug           String              @unique
+  description    String
+  address        String
+  area           String
+  city           String
+  state          String
+  pincode        String?
+  phone          String
+  whatsapp       String?
+  timings        String
+  capacity       Int?
+  latitude       Float?
+  longitude      Float?
+  facilities     Json
+  pricing        Json
+  status         LibraryStatus       @default(ACTIVE)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  images         LibraryImage[]
+  seats          Seat[]
+  memberships    StudentMembership[]
+  bookings       Booking[]
+  reviews        Review[]
+  announcements  Announcement[]
+  favorites      Favorite[]
+  complaints     Complaint[]
+  groupBookings  GroupBooking[]
+
+  @@index([city, status])
+}
+
+model LibraryImage {
+  id         String   @id @default(cuid())
+  libraryId  String
+  library    Library  @relation(fields: [libraryId], references: [id], onDelete: Cascade)
+  url        String
+  publicId   String?
+  isCover    Boolean  @default(false)
+  createdAt  DateTime @default(now())
+}
+
+model Seat {
+  id            String              @id @default(cuid())
+  libraryId     String
+  library       Library             @relation(fields: [libraryId], references: [id], onDelete: Cascade)
+  number        String
+  type          String?
+  isAvailable   Boolean             @default(true)
+  memberships   StudentMembership[]
+
+  @@unique([libraryId, number])
+}
+
+model StudentMembership {
+  id          String           @id @default(cuid())
+  studentId   String
+  student     User             @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  libraryId   String
+  library     Library          @relation(fields: [libraryId], references: [id], onDelete: Cascade)
+  seatId      String?
+  seat        Seat?            @relation(fields: [seatId], references: [id], onDelete: SetNull)
+  startDate   DateTime
+  endDate     DateTime?
+  monthlyFee  Int
+  status      MembershipStatus @default(ACTIVE)
+  attendances Attendance[]
+  payments    Payment[]
+  createdAt   DateTime         @default(now())
+
+  @@index([libraryId, status])
+  @@unique([studentId, libraryId])
+}
+
+model Booking {
+  id         String        @id @default(cuid())
+  studentId  String
+  student    User          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  libraryId  String
+  library    Library       @relation(fields: [libraryId], references: [id], onDelete: Cascade)
+  planName   String?
+  message    String?
+  status     BookingStatus @default(PENDING)
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  @@index([libraryId, status])
+}
+
+model Review {
+  id         String   @id @default(cuid())
+  studentId  String
+  student    User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  libraryId  String
+  library    Library  @relation(fields: [libraryId], references: [id], onDelete: Cascade)
+  rating     Int
+  comment    String?
+  createdAt  DateTime @default(now())
+
+  @@unique([studentId, libraryId])
+}
+
+model Attendance {
+  id            String              @id @default(cuid())
+  membershipId  String
+  membership    StudentMembership   @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  date          DateTime
+  status        AttendanceStatus    @default(PRESENT)
+  checkIn       DateTime?
+  checkOut      DateTime?
+
+  @@unique([membershipId, date])
+}
+
+model Payment {
+  id            String              @id @default(cuid())
+  membershipId  String
+  membership    StudentMembership   @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  amount        Int
+  dueDate       DateTime
+  paidAt        DateTime?
+  status        PaymentStatus       @default(PENDING)
+  note          String?
+  createdAt     DateTime            @default(now())
+}
+
+model Notification {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type       NotificationType @default(SYSTEM)
+  title      String
+  message    String
+  entityId   String?
+  actionPath String?
+  isRead     Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([userId, isRead, createdAt])
+}
+
+model Announcement {
+  id         String   @id @default(cuid())
+  libraryId  String
+  library    Library  @relation(fields: [libraryId], references: [id], onDelete: Cascade)
+  title      String
+  message    String
+  createdAt  DateTime @default(now())
+}
+
+model StudySession {
+  id          String   @id @default(cuid())
+  studentId   String
+  student     User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  durationMin Int
+  mode        String   @default("FOCUS")
+  startedAt   DateTime
+  endedAt     DateTime
+  createdAt   DateTime @default(now())
+}
+
+model StudyStreak {
+  id             String   @id @default(cuid())
+  studentId      String   @unique
+  student        User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  currentDays    Int      @default(0)
+  longestDays    Int      @default(0)
+  lastStudyDate  DateTime?
+  updatedAt      DateTime @updatedAt
+}
+
+model Favorite {
+  id         String   @id @default(cuid())
+  studentId  String
+  student    User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  libraryId  String
+  library    Library  @relation(fields: [libraryId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@unique([studentId, libraryId])
+}
+
+model Task {
+  id          String   @id @default(cuid())
+  studentId   String
+  student     User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  title       String
+  isCompleted Boolean  @default(false)
+  taskDate    DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([studentId, taskDate])
+}
+
+model Complaint {
+  id          String          @id @default(cuid())
+  studentId   String
+  student     User            @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  libraryId   String
+  library     Library         @relation(fields: [libraryId], references: [id], onDelete: Cascade)
+  title       String          @default("Issue report")
+  category    String
+  description String
+  status      ComplaintStatus @default(PENDING)
+  ownerReply  String?
+  resolvedAt  DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([libraryId, status])
+}
+
+model GroupBooking {
+  id           String             @id @default(cuid())
+  leaderId     String
+  leader       User               @relation("GroupLeader", fields: [leaderId], references: [id], onDelete: Cascade)
+  libraryId    String
+  library      Library            @relation(fields: [libraryId], references: [id], onDelete: Cascade)
+  name         String
+  groupSize    Int
+  planName     String?
+  status       GroupBookingStatus @default(INVITING)
+  seatNumbers  Json?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  members      GroupBookingMember[]
+
+  @@index([libraryId, status])
+}
+
+model GroupBookingMember {
+  id             String       @id @default(cuid())
+  groupBookingId String
+  groupBooking   GroupBooking @relation(fields: [groupBookingId], references: [id], onDelete: Cascade)
+  userId         String?
+  user           User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  name           String
+  email          String
+  accepted       Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+
+  @@unique([groupBookingId, email])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  usedAt    DateTime?
+
+  @@index([token, expiresAt])
+}
+
+model UserNotificationPrefs {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  announcements   Boolean  @default(true)
+  bookingUpdates  Boolean  @default(true)
+  complaintUpdates Boolean @default(true)
+  membershipReminders Boolean @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}

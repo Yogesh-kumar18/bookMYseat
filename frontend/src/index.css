@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { @apply border-stone-200 dark:border-white/10; }
+  html { scroll-behavior: smooth; }
+  body { @apply m-0 bg-cream text-ink antialiased dark:bg-[#101713] dark:text-stone-100; }
+  button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
+}
+
+@layer components {
+  .container-app { @apply mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8; }
+  .btn-primary { @apply inline-flex items-center justify-center gap-2 rounded-xl bg-moss px-5 py-3 font-semibold text-white transition hover:bg-[#24573f] disabled:cursor-not-allowed disabled:opacity-50; }
+  .btn-secondary { @apply inline-flex items-center justify-center gap-2 rounded-xl border bg-white/70 px-5 py-3 font-semibold text-ink transition hover:bg-white dark:bg-white/5 dark:text-white dark:hover:bg-white/10; }
+  .card { @apply rounded-3xl border bg-white shadow-soft dark:bg-white/[.04]; }
+  .input { @apply w-full rounded-xl border bg-white px-4 py-3 text-sm outline-none transition placeholder:text-stone-400 focus:border-leaf focus:ring-4 focus:ring-leaf/10 dark:bg-white/5; }
+  .label { @apply mb-1.5 block text-sm font-semibold; }
+  .eyebrow { @apply text-xs font-bold uppercase tracking-[.18em] text-moss dark:text-leaf; }
+}
+
+.hero-grid {
+  background-image: linear-gradient(rgba(47,107,79,.07) 1px, transparent 1px), linear-gradient(90deg, rgba(47,107,79,.07) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.rise { animation: rise .55s ease both; }
