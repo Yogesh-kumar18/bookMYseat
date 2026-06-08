@@ -606,7 +606,43 @@ app.patch("/api/bookings/:id", authenticate, allow("OWNER"), asyncRoute(async (r
   const { status } = z.object({ status: z.enum(["APPROVED", "REJECTED", "WAITLISTED", "CANCELLED"]) }).parse(req.body);
   const booking = await prisma.booking.findUnique({ where: { id: String(req.params.id) }, include: { library: true, student: true } });
   if (!booking || booking.library.ownerId !== req.user!.id) return res.status(404).json({ message: "Booking not found" });
-  const updated = await prisma.booking.update({ where: { id: booking.id }, data: { status } });
+  if (booking.status === "APPROVED" && status === "APPROVED") return res.status(409).json({ message: "Booking is already approved." });
+
+  let updated;
+  try {
+    updated = await prisma.$transaction(async (tx) => {
+      if (status === "APPROVED") {
+        const existingMembership = await tx.studentMembership.findUnique({
+          where: { studentId_libraryId: { studentId: booking.studentId, libraryId: booking.libraryId } }
+        });
+        if (existingMembership) throw new Error("Student already has a membership at this library.");
+
+        const seat = await tx.seat.findFirst({ where: { libraryId: booking.libraryId, isAvailable: true }, orderBy: { number: "asc" } });
+        if (!seat) throw new Error("No seats are currently available.");
+
+        const pricing = Array.isArray(booking.library.pricing) ? booking.library.pricing as Array<{ name?: string; amount?: number }> : [];
+        const selectedPlan = pricing.find((plan) => plan.name === booking.planName) ?? pricing[0];
+        const monthlyFee = Number(selectedPlan?.amount ?? 0);
+
+        await tx.studentMembership.create({
+          data: {
+            studentId: booking.studentId,
+            libraryId: booking.libraryId,
+            seatId: seat.id,
+            monthlyFee,
+            startDate: new Date()
+          }
+        });
+        await tx.seat.update({ where: { id: seat.id }, data: { isAvailable: false } });
+      }
+      return tx.booking.update({ where: { id: booking.id }, data: { status } });
+    });
+  } catch (error) {
+    if (error instanceof Error && ["Student already has a membership at this library.", "No seats are currently available."].includes(error.message)) {
+      return res.status(409).json({ message: error.message });
+    }
+    throw error;
+  }
   await prisma.notification.create({ data: { userId: booking.studentId, type: "BOOKING", entityId: booking.id, actionPath: "/notifications", title: "Booking updated", message: `${booking.library.name} marked your request as ${status.toLowerCase()}.` } });
   const emailStatus = status === "APPROVED" ? await sendMembershipApprovedEmail(booking.student.email, booking.student.name, booking.library.name) : undefined;
   res.json({ ...updated, emailStatus });
