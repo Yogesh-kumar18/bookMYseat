@@ -19,9 +19,19 @@ import { librarySchema, loginSchema, registerSchema } from "./schemas.js";
 const app = express();
 app.set("trust proxy", 1);
 app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
-// For development, allow all origins. For production, use CLIENT_URL from env
-const corsOrigins = env.NODE_ENV === "development" ? true : clientOrigins;
-app.use(cors({ origin: corsOrigins, credentials: true }));
+const isAllowedOrigin = (origin?: string) => {
+  if (!origin || env.NODE_ENV === "development") return true;
+  const normalized = origin.replace(/\/+$/, "");
+  return (
+    clientOrigins.includes(normalized) ||
+    /^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(normalized) ||
+    /^http:\/\/(localhost|127\.0\.0\.1):\d+$/i.test(normalized)
+  );
+};
+app.use(cors({
+  origin: (origin, callback) => callback(null, isAllowedOrigin(origin)),
+  credentials: true
+}));
 app.use(express.json({ limit: "2mb" }));
 app.use("/api/auth", rateLimit({ windowMs: 15 * 60_000, limit: 40, standardHeaders: true }));
 
