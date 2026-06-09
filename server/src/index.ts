@@ -9,7 +9,7 @@ import { ZodError, z } from "zod";
 import { parse } from "csv-parse/sync";
 import multer from "multer";
 import { v2 as cloudinary } from "cloudinary";
-import { env } from "./config.js";
+import { clientOrigins, env, primaryClientOrigin } from "./config.js";
 import { prisma } from "./db.js";
 import { allow, authenticate, signToken } from "./auth.js";
 import { sendMembershipApprovedEmail, sendOwnerRegistrationEmail, sendPasswordResetEmail, sendWelcomeEmail } from "./email.js";
@@ -20,7 +20,7 @@ const app = express();
 app.set("trust proxy", 1);
 app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
 // For development, allow all origins. For production, use CLIENT_URL from env
-const corsOrigins = env.NODE_ENV === "development" ? true : env.CLIENT_URL.split(",").map((item) => item.trim());
+const corsOrigins = env.NODE_ENV === "development" ? true : clientOrigins;
 app.use(cors({ origin: corsOrigins, credentials: true }));
 app.use(express.json({ limit: "2mb" }));
 app.use("/api/auth", rateLimit({ windowMs: 15 * 60_000, limit: 40, standardHeaders: true }));
@@ -81,7 +81,7 @@ app.post("/api/auth/forgot-password", asyncRoute(async (req, res) => {
     data: { userId: user.id, token: hashedToken, expiresAt }
   });
   
-  const resetLink = `${env.CLIENT_URL}/reset-password?token=${resetToken}&email=${encodeURIComponent(user.email)}`;
+  const resetLink = `${primaryClientOrigin}/reset-password?token=${resetToken}&email=${encodeURIComponent(user.email)}`;
   const emailStatus = await sendPasswordResetEmail(user.email, user.name, resetLink);
   if (!emailStatus.ok) return res.status(503).json({ message: "Email delivery failed. Please try again later.", emailStatus });
   

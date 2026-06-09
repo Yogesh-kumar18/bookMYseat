@@ -1,8 +1,12 @@
 const configuredApiUrl = import.meta.env.VITE_API_URL;
 
-const API_URL = configuredApiUrl
-  ? `${configuredApiUrl.replace(/\/$/, "")}/api`
-  : (import.meta.env.PROD ? "" : "http://localhost:4000/api");
+function normalizeApiUrl(value: string | undefined) {
+  if (!value) return import.meta.env.PROD ? "" : "http://localhost:4000/api";
+  const trimmed = value.trim().replace(/\/+$/, "");
+  return trimmed.endsWith("/api") ? trimmed : `${trimmed}/api`;
+}
+
+const API_URL = normalizeApiUrl(configuredApiUrl);
 
 export type Role = "STUDENT" | "OWNER" | "ADMIN";
 export type User = { id: string; name: string; email: string; phone?: string; role: Role; isPro: boolean };

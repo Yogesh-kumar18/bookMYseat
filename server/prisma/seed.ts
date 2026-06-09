@@ -47,23 +47,65 @@ const libraries = [
 ];
 
 async function main() {
+  const adminEmail = process.env.ADMIN_EMAIL?.toLowerCase();
+  const adminPassword = process.env.ADMIN_PASSWORD;
+  if (adminEmail && adminPassword) {
+    await prisma.user.upsert({
+      where: { email: adminEmail },
+      create: { name: "BookMySeat Admin", email: adminEmail, passwordHash: await bcrypt.hash(adminPassword, 12), role: "ADMIN" },
+      update: { passwordHash: await bcrypt.hash(adminPassword, 12), role: "ADMIN", status: "ACTIVE" }
+    });
+  }
+
+  const ownerEmail = process.env.OWNER_EMAIL?.toLowerCase();
+  const ownerPassword = process.env.OWNER_PASSWORD;
+  const owner = ownerEmail && ownerPassword ? await prisma.user.upsert({
+    where: { email: ownerEmail },
+    create: {
+      name: process.env.OWNER_NAME || "BookMySeat Library Owner",
+      email: ownerEmail,
+      phone: process.env.OWNER_PHONE || undefined,
+      passwordHash: await bcrypt.hash(ownerPassword, 12),
+      role: "OWNER"
+    },
+    update: { passwordHash: await bcrypt.hash(ownerPassword, 12), role: "OWNER", status: "ACTIVE" }
+  }) : null;
+
   for (const library of libraries) {
     await prisma.library.upsert({
       where: { slug: library.slug },
-      create: { ...library, address: "Mathura", area: "Mathura", city: "Mathura", state: "Uttar Pradesh" },
-      update: library
+      create: {
+        ...library,
+        address: "Mathura",
+        area: "Mathura",
+        city: "Mathura",
+        state: "Uttar Pradesh",
+        ownerId: owner && (process.env.OWNER_LIBRARY_SLUG || libraries[0].slug) === library.slug ? owner.id : undefined
+      },
+      update: {
+        ...library,
+        ...(owner && (process.env.OWNER_LIBRARY_SLUG || libraries[0].slug) === library.slug ? { ownerId: owner.id } : {})
+      }
     });
   }
-  const email = process.env.ADMIN_EMAIL;
-  const password = process.env.ADMIN_PASSWORD;
-  if (email && password) {
+
+  const studentEmail = process.env.STUDENT_EMAIL?.toLowerCase();
+  const studentPassword = process.env.STUDENT_PASSWORD;
+  if (studentEmail && studentPassword) {
     await prisma.user.upsert({
-      where: { email },
-      create: { name: "BookMySeat Admin", email, passwordHash: await bcrypt.hash(password, 12), role: "ADMIN" },
-      update: { passwordHash: await bcrypt.hash(password, 12), role: "ADMIN" }
+      where: { email: studentEmail },
+      create: {
+        name: process.env.STUDENT_NAME || "BookMySeat Student",
+        email: studentEmail,
+        phone: process.env.STUDENT_PHONE || undefined,
+        passwordHash: await bcrypt.hash(studentPassword, 12),
+        role: "STUDENT"
+      },
+      update: { passwordHash: await bcrypt.hash(studentPassword, 12), role: "STUDENT", status: "ACTIVE" }
     });
   }
-  console.log(`Seeded ${libraries.length} verified library records.`);
+
+  console.log(`Seeded ${libraries.length} verified library records${owner ? " and launch owner" : ""}${studentEmail ? " and launch student" : ""}.`);
 }
 
 main().finally(() => prisma.$disconnect());

@@ -3,8 +3,8 @@ services:
     name: bookmyseat-api
     runtime: node
     rootDir: server
-    buildCommand: npm install && npm run db:generate && npm run build
-    startCommand: npm run db:migrate && npm start
+    buildCommand: npm install --include=dev && npm run db:generate && npm run build
+    startCommand: npm run db:migrate && npm run db:seed && npm start
     healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
@@ -20,4 +20,16 @@ services:
       - key: EMAIL_FROM
         sync: false
       - key: SUPPORT_EMAIL
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: OWNER_EMAIL
+        sync: false
+      - key: OWNER_PASSWORD
+        sync: false
+      - key: STUDENT_EMAIL
+        sync: false
+      - key: STUDENT_PASSWORD
         sync: false

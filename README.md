@@ -38,7 +38,7 @@ copy server\.env.example server\.env
 copy frontend\.env.example frontend\.env
 ```
 
-Set a strong `JWT_SECRET` in `server/.env`, then initialize SQLite:
+Set a strong `JWT_SECRET` in `server/.env` and point `DATABASE_URL` at a PostgreSQL database, then initialize the database:
 
 ```bash
 npm run db:setup
@@ -49,7 +49,7 @@ npm run dev
 - API: `http://localhost:4000/api`
 - Health check: `http://localhost:4000/api/health`
 
-The seed is idempotent. It never creates fake images, reviews, students, bookings, or activity. An admin is created only when both `ADMIN_EMAIL` and `ADMIN_PASSWORD` are configured.
+The seed is idempotent. It creates the six verified Mathura library records and never creates fake images, reviews, bookings, or activity. Admin, owner, and student launch accounts are created only when the matching email/password environment variables are configured. If `OWNER_EMAIL`, `OWNER_PASSWORD`, and `OWNER_LIBRARY_SLUG` are configured, that owner is attached to the matching seeded library.
 
 ## CSV import
 
@@ -91,22 +91,22 @@ Email is used for student/owner welcome messages, password reset links, owner re
 
 1. Create a Render service from `render.yaml`.
 2. Configure `CLIENT_URL` with the deployed frontend origin.
-3. Configure `DATABASE_URL`.
+3. Configure `DATABASE_URL` with a PostgreSQL database from Render, Supabase, Neon, or another managed PostgreSQL provider.
 4. Add `RESEND_API_KEY`, `EMAIL_FROM` and `SUPPORT_EMAIL` for transactional email.
 5. Add Cloudinary variables when image uploads are required.
 
-SQLite on an ephemeral filesystem is not durable. For a single Render instance, attach a persistent disk and point `DATABASE_URL` to it. For horizontal scale, switch the Prisma datasource to PostgreSQL before launch.
+SQLite is no longer used for production because Render's filesystem is ephemeral and SQLite is not suitable for horizontal scaling. Prisma is configured for PostgreSQL and `render.yaml` runs `prisma migrate deploy` followed by the idempotent seed during startup.
 
 ### Web on Vercel
 
 1. Import the repository into Vercel.
 2. The root `vercel.json` builds `frontend`.
-3. Set `VITE_API_URL` to the deployed API URL ending in `/api`.
+3. Set `VITE_API_URL` to the deployed API origin, for example `https://bookmyseat-0m13.onrender.com`. The frontend also accepts a value ending in `/api`.
 
 ## Production checklist
 
 - Replace all example secrets and restrict `CLIENT_URL` to deployed origins.
-- Configure a durable production database and automated backups.
+- Configure a durable PostgreSQL database and automated backups.
 - Verify Resend domain authentication, sender reputation and production email logs.
 - Add SMS or WhatsApp delivery for urgent reminders where owners need it.
 - Configure Cloudinary upload presets and moderation.
@@ -121,3 +121,8 @@ npm run dev          # run API and web together
 npm run build        # production builds
 npm run db:setup     # generate client, push schema, seed real listings
 ```
+
+
+
+
+8192095750@123
