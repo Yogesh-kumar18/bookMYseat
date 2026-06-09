@@ -72,19 +72,26 @@ enum LibraryImageType {
   OTHER
 }
 
-enum CommunityCategory {
-  CURRENT_AFFAIRS
-  VACANCIES
-  STUDY_MATERIAL
-  EXAM_UPDATES
-  GENERAL_DISCUSSION
-}
-
 enum CommunityReportStatus {
   OPEN
   IN_REVIEW
   RESOLVED
   DISMISSED
+}
+
+enum CommunityChannelType {
+  GLOBAL
+  LIBRARY
+  DIRECT
+}
+
+enum CommunityMessageType {
+  TEXT
+  VACANCY
+  CURRENT_AFFAIRS
+  EXAM_UPDATE
+  NOTE
+  FILE
 }
 
 enum GroupBookingStatus {
@@ -120,12 +127,14 @@ model User {
   groupMemberships      GroupBookingMember[]
   passwordResets        PasswordResetToken[]
   notificationPrefs     UserNotificationPrefs?
-  communityPosts        CommunityPost[]
-  communityComments     CommunityComment[]
-  communityReactions    CommunityReaction[]
+  communityMemberships  CommunityChannelMember[]
+  communityMessages     CommunityMessage[]
+  communityReactions    CommunityMessageReaction[]
   communityReports      CommunityReport[]      @relation("CommunityReporter")
   blockedUsers          UserBlock[]            @relation("Blocker")
   blockedBy             UserBlock[]            @relation("Blocked")
+  mutedUsers            UserMute[]             @relation("Muter")
+  mutedBy               UserMute[]             @relation("Muted")
 }
 
 model Library {
@@ -160,6 +169,7 @@ model Library {
   favorites      Favorite[]
   complaints     Complaint[]
   groupBookings  GroupBooking[]
+  communityChannels CommunityChannel[]
 
   @@index([city, status])
 }
@@ -405,59 +415,79 @@ model UserNotificationPrefs {
   updatedAt       DateTime @updatedAt
 }
 
-model CommunityPost {
-  id         String            @id @default(cuid())
-  authorId   String
-  author     User              @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  category   CommunityCategory
-  title      String
-  body       String
-  isDeleted  Boolean           @default(false)
-  createdAt  DateTime          @default(now())
-  updatedAt  DateTime          @updatedAt
-  comments   CommunityComment[]
-  reactions  CommunityReaction[]
-  reports    CommunityReport[]
+model CommunityChannel {
+  id          String                  @id @default(cuid())
+  type        CommunityChannelType
+  name        String
+  description String?
+  libraryId   String?
+  library     Library?                @relation(fields: [libraryId], references: [id], onDelete: Cascade)
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+  members     CommunityChannelMember[]
+  messages    CommunityMessage[]
 
-  @@index([category, createdAt])
-  @@index([authorId, createdAt])
+  @@index([type, libraryId])
 }
 
-model CommunityComment {
-  id         String          @id @default(cuid())
-  postId     String
-  post       CommunityPost   @relation(fields: [postId], references: [id], onDelete: Cascade)
-  authorId   String
-  author     User            @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  body       String
-  isDeleted  Boolean         @default(false)
-  createdAt  DateTime        @default(now())
-  updatedAt  DateTime        @updatedAt
-  reports    CommunityReport[]
+model CommunityChannelMember {
+  id          String           @id @default(cuid())
+  channelId   String
+  channel     CommunityChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  isRemoved   Boolean          @default(false)
+  isBanned    Boolean          @default(false)
+  lastReadAt  DateTime?
+  createdAt   DateTime         @default(now())
 
-  @@index([postId, createdAt])
+  @@unique([channelId, userId])
+  @@index([userId, isRemoved, isBanned])
 }
 
-model CommunityReaction {
-  id        String        @id @default(cuid())
-  postId    String
-  post      CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+model CommunityMessage {
+  id          String                   @id @default(cuid())
+  channelId   String
+  channel     CommunityChannel         @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  senderId    String
+  sender      User                     @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  replyToId   String?
+  replyTo     CommunityMessage?        @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies     CommunityMessage[]       @relation("MessageReplies")
+  type        CommunityMessageType     @default(TEXT)
+  body        String?
+  attachmentUrl String?
+  attachmentName String?
+  attachmentMime String?
+  isDeleted   Boolean                  @default(false)
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
+  reactions   CommunityMessageReaction[]
+  reports     CommunityReport[]
+
+  @@index([channelId, createdAt])
+  @@index([senderId, createdAt])
+}
+
+model CommunityMessageReaction {
+  id        String           @id @default(cuid())
+  messageId String
+  message   CommunityMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
   userId    String
-  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type      String        @default("LIKE")
-  createdAt DateTime      @default(now())
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emoji     String
+  createdAt DateTime         @default(now())
 
-  @@unique([postId, userId, type])
+  @@unique([messageId, userId, emoji])
 }
 
 model CommunityReport {
   id         String                 @id @default(cuid())
   reporterId String
   reporter   User                   @relation("CommunityReporter", fields: [reporterId], references: [id], onDelete: Cascade)
-  postId     String?
-  post       CommunityPost?         @relation(fields: [postId], references: [id], onDelete: Cascade)
-  commentId  String?
-  comment    CommunityComment?      @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  messageId  String?
+  message    CommunityMessage?      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  reportedUserId String?
   reason     String
   status     CommunityReportStatus  @default(OPEN)
   createdAt  DateTime               @default(now())
@@ -475,4 +505,15 @@ model UserBlock {
   createdAt DateTime @default(now())
 
   @@unique([blockerId, blockedId])
+}
+
+model UserMute {
+  id        String   @id @default(cuid())
+  muterId   String
+  muter     User     @relation("Muter", fields: [muterId], references: [id], onDelete: Cascade)
+  mutedId   String
+  muted     User     @relation("Muted", fields: [mutedId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([muterId, mutedId])
 }

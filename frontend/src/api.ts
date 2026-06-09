@@ -20,13 +20,17 @@ export type Library = {
   reviews?: { id: string; rating: number; comment?: string; createdAt: string; student?: { name: string } }[];
 };
 
-export type CommunityCategory = "CURRENT_AFFAIRS" | "VACANCIES" | "STUDY_MATERIAL" | "EXAM_UPDATES" | "GENERAL_DISCUSSION";
-export type CommunityPost = {
-  id: string; category: CommunityCategory; title: string; body: string; createdAt: string;
-  author: { id: string; name: string; role: Role };
-  comments: { id: string; body: string; createdAt: string; author: { id: string; name: string; role: Role } }[];
-  reactions: { id: string; userId: string; type: string }[];
-  _count?: { comments: number; reactions: number; reports: number };
+export type CommunityMessageType = "TEXT" | "VACANCY" | "CURRENT_AFFAIRS" | "EXAM_UPDATE" | "NOTE" | "FILE";
+export type CommunityMember = { id: string; userId: string; user: { id: string; name: string; role: Role } };
+export type CommunityChannel = {
+  id: string; type: "GLOBAL" | "LIBRARY" | "DIRECT"; name: string; description?: string; libraryId?: string;
+  members?: CommunityMember[]; latestMessage?: CommunityMessage | null; unreadCount?: number;
+};
+export type CommunityMessage = {
+  id: string; channelId: string; senderId: string; type: CommunityMessageType; body?: string | null;
+  attachmentUrl?: string | null; attachmentName?: string | null; attachmentMime?: string | null;
+  isDeleted: boolean; createdAt: string; sender: { id: string; name: string; role: Role };
+  replyTo?: CommunityMessage | null; reactions: { id?: string; emoji: string; userId: string; user?: { id: string; name: string } }[];
 };
 
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {

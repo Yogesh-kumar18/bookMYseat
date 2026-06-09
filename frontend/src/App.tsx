@@ -5,9 +5,10 @@ import {
   ArrowRight, BarChart3, Bell, BookOpen, Building2, Check, ChevronRight, Clock3, Flame, Heart,
   Download, IndianRupee, LayoutDashboard, LogOut, MapPin, Menu, Moon, Phone, Search, ShieldCheck, Sparkles,
   Star, Sun, TimerReset, Upload, Users, X, Plus, Trash2, MessageSquare, UserPlus, CheckCircle2,
-  AlertCircle, BookMarked, Settings, Home as HomeIcon, Zap, Image as ImageIcon, Navigation, Flag, ThumbsUp, Send, Ban
+  AlertCircle, BookMarked, Settings, Home as HomeIcon, Zap, Image as ImageIcon, Navigation, Flag, ThumbsUp, Send, Ban,
+  Paperclip, Smile, Reply, FileText, Video, MoreVertical, Award, Crown, ShieldAlert, UserCircle, MessageCircle, Megaphone
 } from "lucide-react";
-import { api, type CommunityPost, type Library, type Role } from "./api";
+import { api, type CommunityChannel, type CommunityMessage, type Library, type Role } from "./api";
 import { AuthProvider, useAuth } from "./auth";
 import { isIosSafari, isStandaloneDisplay, type BeforeInstallPromptEvent } from "./pwa";
 
@@ -303,7 +304,7 @@ function AuthPage({ mode }: { mode: "login" | "register" }) {
   return <Layout><section className="container-app grid min-h-[76vh] items-center gap-8 py-10 lg:grid-cols-[1.1fr_.9fr]">
     <div className="hidden lg:block">
       <span className="eyebrow">{mode === "login" ? "Welcome back" : "Start with confidence"}</span>
-      <h1 className="mt-4 max-w-2xl font-display text-5xl font-extrabold leading-tight">A calmer way to manage study seats, memberships, and daily library life.</h1>
+      <h1 className="mt-4 max-w-2xl font-display text-5xl font-extrabold leading-tight">Study smarter. Track progress. Connect with serious learners.</h1>
       <div className="mt-8 grid max-w-xl gap-3">
         {[["Verified libraries", "Real listings with photos, facilities, and pricing."], ["Student tools", "Membership status, complaints, tasks, and community in one place."], ["Owner ready", "Bookings, fees, attendance, and announcements built in."]].map(([title, text]) => <div key={title} className="flex gap-3 rounded-2xl border bg-white/70 p-4 shadow-soft dark:bg-white/5"><ShieldCheck className="mt-0.5 text-moss" size={20} /><div><p className="font-bold">{title}</p><p className="text-sm text-stone-500">{text}</p></div></div>)}
       </div>
@@ -414,125 +415,139 @@ function CompactStudentDashboard() {
   const firstName = user?.name?.split(" ")[0] || "Student";
   const expiryDate = currentMembership?.endDate ? new Date(currentMembership.endDate) : null;
   const daysRemaining = expiryDate ? Math.max(0, Math.ceil((expiryDate.getTime() - Date.now()) / 86_400_000)) : null;
+  const currentStreak = data.streak?.currentDays || 0;
+  const streak = getStreakStyle(currentStreak);
+  const badges = getConsistencyBadges(currentStreak);
+  const unlockedBadges = badges.filter((badge) => badge.unlocked);
+  const completedTasks = todayTasks.filter((task: any) => task.isCompleted).length;
+  const communityUpdates = [
+    { title: "Mathura Community", text: "Share notes, vacancies, exam updates and current affairs with verified students.", icon: <MessageSquare size={18} />, to: "/community" },
+    { title: currentMembership?.library?.name ? `${currentMembership.library.name} Group` : "Library groups", text: currentMembership ? "Coordinate seats, timing changes and daily library updates." : "Join a library to unlock library-wise groups.", icon: <Users size={18} />, to: "/community" },
+    { title: "Direct messages", text: "Message classmates privately, share notes, and use report or block controls when needed.", icon: <ShieldCheck size={18} />, to: "/community" }
+  ];
 
   return <StudentDashboardLayout>
-    <div className="min-h-screen bg-[#f2f2ec] dark:bg-[#0d130f]">
-      <header className="border-b bg-white/90 backdrop-blur dark:bg-[#101713]/90">
-        <div className="container-app flex items-center justify-between gap-4 py-4">
-          <div className="min-w-0">
-            <h1 className="truncate font-display text-2xl font-extrabold sm:text-3xl">Welcome back, {firstName}</h1>
-            <p className="mt-1 text-sm text-stone-500 dark:text-stone-400">Stay focused. One session at a time.</p>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <NotificationBell />
-            <div className="hidden rounded-full border bg-white px-3 py-2 text-xs font-bold text-stone-600 dark:bg-white/5 dark:text-stone-200 sm:block">{unreadNotifications} unread</div>
-            <Link to="/settings" aria-label="Profile settings" className="grid h-10 w-10 place-items-center rounded-full bg-moss text-sm font-extrabold text-white">{firstName.charAt(0).toUpperCase()}</Link>
-          </div>
-        </div>
-      </header>
-
-      <main className="container-app py-6">
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {[
-            [<BookOpen size={18} />, "Active Memberships", String(activeMemberships.length)],
-            [<MapPin size={18} />, "Current Seat", currentMembership?.seat?.number || "Unassigned"],
-            [<Clock3 size={18} />, "Days Remaining", daysRemaining == null ? "Not set" : String(daysRemaining)],
-            [<Bell size={18} />, "Unread Notifications", String(unreadNotifications)]
-          ].map(([icon, label, value]) => <div key={String(label)} className="card flex items-center gap-3 p-4">
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-moss/10 text-moss dark:bg-leaf/10 dark:text-leaf">{icon}</span>
-            <div className="min-w-0"><p className="text-[11px] font-bold uppercase tracking-wide text-stone-500 dark:text-stone-400">{label}</p><p className="mt-1 truncate text-lg font-extrabold">{value}</p></div>
-          </div>)}
-        </div>
-
-        <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,7fr)_minmax(280px,3fr)]">
-          <section className="card p-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div><p className="eyebrow">My Membership</p><h2 className="mt-1 font-display text-xl font-extrabold">{currentMembership?.library?.name || "No active membership"}</h2></div>
-              {currentMembership ? <Status value={currentMembership.status} /> : null}
-            </div>
-            {currentMembership ? <>
-              <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="rounded-xl border bg-stone-50/60 p-3 dark:bg-white/5"><p className="text-xs text-stone-500">Seat Number</p><p className="mt-1 font-bold">{currentMembership.seat?.number || "Unassigned"}</p></div>
-                <div className="rounded-xl border bg-stone-50/60 p-3 dark:bg-white/5"><p className="text-xs text-stone-500">Days Remaining</p><p className="mt-1 font-bold">{daysRemaining == null ? "Not set" : `${daysRemaining} days`}</p></div>
-                <div className="rounded-xl border bg-stone-50/60 p-3 dark:bg-white/5"><p className="text-xs text-stone-500">Monthly Fee</p><p className="mt-1 font-bold">{money.format(currentMembership.monthlyFee)}</p></div>
-                <div className="rounded-xl border bg-stone-50/60 p-3 dark:bg-white/5"><p className="text-xs text-stone-500">Status</p><p className="mt-1 font-bold">{currentMembership.status.replace("_", " ")}</p></div>
-                <div className="rounded-xl border bg-stone-50/60 p-3 dark:bg-white/5"><p className="text-xs text-stone-500">Expiry Date</p><p className="mt-1 font-bold">{currentMembership.endDate ? new Date(currentMembership.endDate).toLocaleDateString() : "Not set"}</p></div>
-              </div>
+    <div className="min-h-screen bg-[#f6f6f1] dark:bg-[#0d130f]">
+      <main className="container-app space-y-5 py-5 sm:py-8">
+        <section className={`overflow-hidden rounded-3xl border p-5 text-white shadow-soft ${streak.panel}`}>
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-xs font-bold uppercase tracking-[.18em] text-white/70">Welcome Header</p>
+              <h1 className="mt-2 max-w-xl font-display text-3xl font-extrabold leading-tight sm:text-5xl">Welcome back, {firstName}</h1>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-white/80">Study smarter today. Your seat, groups, tasks, updates and consistency streak are all ready.</p>
               <div className="mt-5 flex flex-wrap gap-2">
-                <Link to={`/libraries/${currentMembership.library.slug || currentMembership.library.id}`} className="btn-primary !px-4 !py-2 text-sm">View Library</Link>
-                <a href={`tel:${currentMembership.library.phone}`} className="btn-secondary !px-4 !py-2 text-sm"><Phone size={16} />Contact Owner</a>
-                <Link to="/membership" className="btn-secondary !px-4 !py-2 text-sm">Renew Membership</Link>
+                <Link to="/community" className="rounded-xl bg-white px-4 py-2 text-sm font-extrabold text-ink"><MessageSquare size={16} className="mr-1 inline" /> Open Community</Link>
+                <Link to="/tasks" className="rounded-xl border border-white/30 px-4 py-2 text-sm font-extrabold text-white">Plan Today</Link>
               </div>
-            </> : <div className="mt-5 flex flex-col items-start gap-3 rounded-xl border border-dashed bg-stone-50/70 p-5 dark:bg-white/5">
-              <div className="flex items-center gap-3"><span className="grid h-10 w-10 place-items-center rounded-xl bg-moss/10 text-moss"><BookOpen size={20} /></span><div><p className="font-bold">No active membership</p><p className="text-sm text-stone-500">Explore verified study libraries and request your first seat.</p></div></div>
-              <Link to="/discover" className="btn-primary !px-4 !py-2 text-sm">Explore Libraries</Link>
-            </div>}
-          </section>
-
-          <section className="card p-5">
-            <div className="flex items-center justify-between gap-3"><h2 className="font-display text-lg font-extrabold">Recent Announcements</h2><Link to="/announcements" className="text-sm font-bold text-moss dark:text-leaf">View All</Link></div>
-            <div className="mt-4 max-h-72 overflow-y-auto pr-1">
-              {latestAnnouncements.map((item: any) => <article key={item.id} className="flex gap-3 border-b py-3 last:border-0">
-                <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-moss dark:bg-leaf" />
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-bold">{item.title}</p>
-                  <p className="mt-1 truncate text-xs text-stone-500">{item.library.name} - {new Date(item.createdAt).toLocaleDateString()}</p>
-                </div>
-              </article>)}
-              {!latestAnnouncements.length && <div className="rounded-xl border border-dashed p-5 text-center"><Bell className="mx-auto text-stone-400" size={24} /><p className="mt-2 text-sm font-bold">No announcements yet</p><p className="mt-1 text-xs text-stone-500">Updates from your library will appear here.</p></div>}
             </div>
-          </section>
-        </div>
-
-        <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,420px)]">
-          <section className="card p-5">
-            <div className="flex items-center justify-between gap-3"><h2 className="font-display text-lg font-extrabold">Complaints</h2><Link to="/report-issue" className="text-sm font-bold text-moss dark:text-leaf">Report</Link></div>
-            <div className="mt-4 grid gap-3">
-              {latestComplaints.map((item: any) => <div key={item.id} className="rounded-xl border bg-stone-50/60 p-3 dark:bg-white/5">
-                <div className="flex items-start justify-between gap-3"><p className="text-sm font-bold">{item.title}</p><Status value={item.status} /></div>
-                <p className="mt-1 truncate text-xs text-stone-500">{item.library?.name} - {item.category}</p>
-              </div>)}
-              {!latestComplaints.length && <p className="rounded-xl border border-dashed p-4 text-center text-sm text-stone-500">No open reports.</p>}
-            </div>
-          </section>
-
-          <section className="card p-5">
-            <h2 className="font-display text-lg font-extrabold">Tasks</h2>
-            <div className="mt-4 grid gap-2">
-              {todayTasks.slice(0, 4).map((task: any) => <div key={task.id} className="flex items-center gap-2 rounded-lg border p-3 text-sm"><span className={`h-2 w-2 rounded-full ${task.isCompleted ? "bg-leaf" : "bg-sun"}`} /><span className={task.isCompleted ? "text-stone-400 line-through" : "font-medium"}>{task.title}</span></div>)}
-              {!todayTasks.length && <p className="rounded-xl border border-dashed p-4 text-center text-sm text-stone-500">No tasks for today.</p>}
-            </div>
-            <div className="mt-4 grid grid-cols-2 gap-2">
-              <Link to="/tasks" className="btn-secondary !px-3 !py-2 text-sm"><Zap size={16} />Open Tasks</Link>
-              <Link to="/discover" className="btn-secondary !px-3 !py-2 text-sm"><Search size={16} />Find Library</Link>
-            </div>
-          </section>
-        </div>
-
-        <section className="card mt-4 p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div><h2 className="font-display text-lg font-extrabold">Group Study</h2><p className="mt-1 text-sm text-stone-500">Coordinate nearby seats without leaving your dashboard.</p></div>
-            <div className="flex gap-2"><Link to="/group-study" className="btn-primary !px-4 !py-2 text-sm">Create Group</Link><Link to="/group-study" className="btn-secondary !px-4 !py-2 text-sm">Join Group</Link></div>
-          </div>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <div className="rounded-xl border bg-stone-50/60 p-4 dark:bg-white/5"><p className="text-xs font-bold uppercase tracking-wide text-stone-500">Active Groups</p><p className="mt-1 text-2xl font-extrabold">{activeGroups.length}</p></div>
-            <div className="rounded-xl border bg-stone-50/60 p-4 dark:bg-white/5"><p className="text-xs font-bold uppercase tracking-wide text-stone-500">Pending Invites</p><p className="mt-1 text-2xl font-extrabold">{pendingInviteCount}</p></div>
+            <Link to="/settings" aria-label="Profile settings" className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-white/15 text-lg font-extrabold ring-1 ring-white/20">{firstName.charAt(0).toUpperCase()}</Link>
           </div>
         </section>
 
-        <section className="card mt-4 p-5">
-          <div className="flex items-center justify-between gap-3"><h2 className="font-display text-lg font-extrabold">Study Progress</h2><Flame className="text-moss dark:text-leaf" size={20} /></div>
-          <div className="mt-4 grid gap-3 sm:grid-cols-3">
-            <div><p className="text-xs text-stone-500">Current Streak</p><p className="mt-1 text-2xl font-extrabold">{data.streak?.currentDays || 0} days</p></div>
-            <div><p className="text-xs text-stone-500">Hours Today</p><p className="mt-1 text-2xl font-extrabold">{todayHours.toFixed(1)}</p></div>
-            <div><p className="text-xs text-stone-500">Weekly Goal</p><p className="mt-1 text-2xl font-extrabold">{weeklyGoalPercent}%</p></div>
+        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {[
+            [<BookOpen size={18} />, "Active Memberships", String(activeMemberships.length), "Libraries you can access"],
+            [<MapPin size={18} />, "Current Seat", currentMembership?.seat?.number || "Unassigned", currentMembership?.library?.name || "No active library"],
+            [<Clock3 size={18} />, "Days Remaining", daysRemaining == null ? "Not set" : String(daysRemaining), "Membership validity"],
+            [<Bell size={18} />, "Unread Counts", String(unreadNotifications), "Notifications waiting"]
+          ].map(([icon, label, value, hint]) => <div key={String(label)} className="rounded-2xl border bg-white p-4 shadow-soft dark:bg-white/[.04]">
+            <span className="grid h-10 w-10 place-items-center rounded-xl bg-ink text-white dark:bg-white dark:text-ink">{icon}</span>
+            <p className="mt-4 text-xs font-bold uppercase tracking-wide text-stone-500">{label}</p>
+            <p className="mt-1 truncate font-display text-2xl font-extrabold">{value}</p>
+            <p className="mt-1 truncate text-xs text-stone-500">{hint}</p>
+          </div>)}
+        </section>
+
+        <section className="grid gap-5 lg:grid-cols-[minmax(0,1.4fr)_minmax(300px,.8fr)]">
+          <div className="rounded-3xl border bg-white p-5 shadow-soft dark:bg-white/[.04]">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div><p className="text-xs font-bold uppercase tracking-[.16em] text-moss">Membership Overview</p><h2 className="mt-1 font-display text-2xl font-extrabold">{currentMembership?.library?.name || "No active membership"}</h2></div>
+              {currentMembership ? <Status value={currentMembership.status} /> : null}
+            </div>
+            {currentMembership ? <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {[
+                ["Seat", currentMembership.seat?.number || "Unassigned"],
+                ["Monthly Fee", money.format(currentMembership.monthlyFee)],
+                ["Expires", currentMembership.endDate ? new Date(currentMembership.endDate).toLocaleDateString() : "Not set"],
+                ["Pending Requests", String(pendingRequests.length)]
+              ].map(([label, value]) => <div key={label} className="rounded-2xl border bg-stone-50 p-4 dark:bg-white/5"><p className="text-xs text-stone-500">{label}</p><p className="mt-1 text-lg font-extrabold">{value}</p></div>)}
+            </div> : <div className="mt-5 rounded-2xl border border-dashed p-5"><p className="font-bold">Start with a verified study library.</p><p className="mt-1 text-sm text-stone-500">Explore nearby libraries and request your first seat.</p></div>}
+            <div className="mt-5 flex flex-wrap gap-2">
+              {currentMembership && <a href={`tel:${currentMembership.library.phone}`} className="btn-secondary !px-4 !py-2 text-sm"><Phone size={16} /> Owner</a>}
+              <Link to="/membership" className="btn-secondary !px-4 !py-2 text-sm"><Star size={16} /> Membership</Link>
+              <Link to="/discover" className="btn-primary !px-4 !py-2 text-sm"><Search size={16} /> Find Library</Link>
+            </div>
           </div>
-          <div className="mt-4 h-2 overflow-hidden rounded-full bg-stone-200 dark:bg-white/10"><div className="h-full rounded-full bg-moss dark:bg-leaf" style={{ width: `${weeklyGoalPercent}%` }} /></div>
-          <p className="mt-2 text-xs text-stone-500">{Math.round(weeklyMinutes / 60)} of {weeklyGoalHours} focused hours this week</p>
+
+          <div className={`rounded-3xl border p-5 shadow-soft ${streak.card}`}>
+            <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[.16em] opacity-70">Streak System</p><h2 className="mt-1 font-display text-2xl font-extrabold">{currentStreak} day streak</h2><p className="mt-1 text-sm opacity-75">{streak.label}</p></div><Flame size={34} className="shrink-0" /></div>
+            <div className="mt-5 grid grid-cols-3 gap-2 text-center">
+              <div className="rounded-2xl bg-white/60 p-3 dark:bg-black/15"><p className="text-xs opacity-70">Today</p><p className="font-extrabold">{todayHours.toFixed(1)}h</p></div>
+              <div className="rounded-2xl bg-white/60 p-3 dark:bg-black/15"><p className="text-xs opacity-70">Week</p><p className="font-extrabold">{weeklyGoalPercent}%</p></div>
+              <div className="rounded-2xl bg-white/60 p-3 dark:bg-black/15"><p className="text-xs opacity-70">Best</p><p className="font-extrabold">{data.streak?.longestDays || 0}</p></div>
+            </div>
+            <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/50 dark:bg-black/20"><div className="h-full rounded-full bg-current" style={{ width: `${weeklyGoalPercent}%` }} /></div>
+          </div>
+        </section>
+
+        <section className="rounded-3xl border bg-white p-5 shadow-soft dark:bg-white/[.04]">
+          <div className="flex items-center justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[.16em] text-moss">Announcements</p><h2 className="mt-1 font-display text-xl font-extrabold">Library updates</h2></div><Link to="/announcements" className="text-sm font-bold text-moss">View all</Link></div>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            {latestAnnouncements.map((item: any) => <article key={item.id} className="rounded-2xl border bg-stone-50 p-4 dark:bg-white/5"><p className="text-xs font-bold uppercase tracking-wide text-stone-500">{item.library.name}</p><h3 className="mt-1 font-bold">{item.title}</h3><p className="mt-1 line-clamp-2 text-sm text-stone-500">{item.message}</p></article>)}
+            {!latestAnnouncements.length && <p className="rounded-2xl border border-dashed p-5 text-center text-sm text-stone-500">No announcements yet.</p>}
+          </div>
+        </section>
+
+        <section className="rounded-3xl border bg-white p-5 shadow-soft dark:bg-white/[.04]">
+          <div><p className="text-xs font-bold uppercase tracking-[.16em] text-moss">Community Updates</p><h2 className="mt-1 font-display text-xl font-extrabold">Groups and messages</h2></div>
+          <div className="mt-4 grid gap-3 md:grid-cols-3">{communityUpdates.map((item) => <Link key={item.title} to={item.to} className="rounded-2xl border p-4 transition hover:border-moss hover:bg-moss/5">
+            <span className="grid h-10 w-10 place-items-center rounded-xl bg-moss/10 text-moss">{item.icon}</span><h3 className="mt-3 font-bold">{item.title}</h3><p className="mt-1 text-sm leading-5 text-stone-500">{item.text}</p>
+          </Link>)}</div>
+        </section>
+
+        <section className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="rounded-3xl border bg-white p-5 shadow-soft dark:bg-white/[.04]">
+            <div className="flex items-center justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[.16em] text-moss">Tasks</p><h2 className="mt-1 font-display text-xl font-extrabold">{completedTasks}/{todayTasks.length || 0} complete today</h2></div><Link to="/tasks" className="text-sm font-bold text-moss">Open</Link></div>
+            <div className="mt-4 grid gap-2">{todayTasks.slice(0, 5).map((task: any) => <div key={task.id} className="flex min-h-12 items-center gap-3 rounded-2xl border px-4 text-sm"><span className={`grid h-5 w-5 place-items-center rounded-md border ${task.isCompleted ? "border-moss bg-moss text-white" : ""}`}>{task.isCompleted && <Check size={13} />}</span><span className={task.isCompleted ? "text-stone-400 line-through" : "font-semibold"}>{task.title}</span></div>)}{!todayTasks.length && <p className="rounded-2xl border border-dashed p-5 text-center text-sm text-stone-500">No tasks for today.</p>}</div>
+          </div>
+
+          <div className="rounded-3xl border bg-white p-5 shadow-soft dark:bg-white/[.04]">
+            <p className="text-xs font-bold uppercase tracking-[.16em] text-moss">Badge System</p><h2 className="mt-1 font-display text-xl font-extrabold">Profile badges</h2>
+            <div className="mt-4 grid grid-cols-2 gap-2">{badges.map((badge) => <div key={badge.level} className={`unlock-pop rounded-2xl border p-3 ${badge.unlocked ? badge.color : "bg-stone-50 text-stone-400 dark:bg-white/5"}`}>
+              <span className="grid h-9 w-9 place-items-center rounded-xl bg-white/70 dark:bg-black/10">{badge.icon}</span><p className="mt-2 text-sm font-extrabold">Level {badge.level}</p><p className="text-xs">{badge.days} days</p>
+            </div>)}</div>
+            <p className="mt-3 text-xs text-stone-500">{unlockedBadges.length ? `${unlockedBadges.length} consistency badges shown on your profile.` : "Reach a 50 day streak to unlock your first profile badge."}</p>
+          </div>
+        </section>
+
+        <section className="rounded-3xl border bg-white p-5 shadow-soft dark:bg-white/[.04]">
+          <div><p className="text-xs font-bold uppercase tracking-[.16em] text-moss">Quick Actions</p><h2 className="mt-1 font-display text-xl font-extrabold">Next useful moves</h2></div>
+          <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            {[["Community", "/community", <MessageSquare size={17} />], ["Group Study", "/group-study", <Users size={17} />], ["Report Issue", "/report-issue", <ShieldAlert size={17} />], ["Notifications", "/notifications", <Bell size={17} />]].map(([label, to, icon]) => <Link key={String(label)} to={String(to)} className="btn-secondary !justify-start !px-4 !py-3 text-sm">{icon}{label}</Link>)}
+          </div>
+          {latestComplaints.length > 0 && <div className="mt-4 grid gap-2">{latestComplaints.map((item: any) => <div key={item.id} className="rounded-2xl border bg-stone-50 p-3 text-sm dark:bg-white/5"><div className="flex items-center justify-between gap-2"><b>{item.title}</b><Status value={item.status} /></div></div>)}</div>}
         </section>
       </main>
     </div>
   </StudentDashboardLayout>;
+}
+
+function getStreakStyle(days: number) {
+  if (days >= 200) return { label: "Gold consistency", panel: "bg-gradient-to-br from-[#6b4b00] via-[#b58412] to-[#f6c453]", card: "bg-[#fff4c7] text-[#6b4b00] dark:bg-[#4a3508] dark:text-[#ffe29a]" };
+  if (days >= 100) return { label: "Purple discipline", panel: "bg-gradient-to-br from-[#382069] via-[#6d45c2] to-[#a78bfa]", card: "bg-[#f0e9ff] text-[#4c2a86] dark:bg-[#26183f] dark:text-[#dccdff]" };
+  if (days >= 30) return { label: "Blue momentum", panel: "bg-gradient-to-br from-[#153e75] via-[#2563eb] to-[#60a5fa]", card: "bg-[#e8f1ff] text-[#174287] dark:bg-[#142844] dark:text-[#cfe3ff]" };
+  if (days >= 7) return { label: "Green rhythm", panel: "bg-gradient-to-br from-[#14532d] via-[#24844b] to-[#73d88b]", card: "bg-[#e7f8ed] text-[#14532d] dark:bg-[#12301d] dark:text-[#c4f7d1]" };
+  return { label: "Build the habit", panel: "bg-gradient-to-br from-[#3f3f46] via-[#71717a] to-[#a8a29e]", card: "bg-stone-100 text-stone-700 dark:bg-white/10 dark:text-stone-100" };
+}
+
+function getConsistencyBadges(days: number) {
+  return [
+    { level: 1, days: 50, icon: <Award size={18} />, color: "bg-emerald-50 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-200" },
+    { level: 2, days: 100, icon: <ShieldCheck size={18} />, color: "bg-sky-50 text-sky-800 dark:bg-sky-500/10 dark:text-sky-200" },
+    { level: 3, days: 150, icon: <Sparkles size={18} />, color: "bg-violet-50 text-violet-800 dark:bg-violet-500/10 dark:text-violet-200" },
+    { level: 4, days: 200, icon: <Crown size={18} />, color: "bg-amber-50 text-amber-800 dark:bg-amber-500/10 dark:text-amber-200" },
+    { level: 5, days: 365, icon: <Flame size={18} />, color: "bg-rose-50 text-rose-800 dark:bg-rose-500/10 dark:text-rose-200" }
+  ].map((badge) => ({ ...badge, unlocked: days >= badge.days }));
 }
 
 function LegacyStudentDashboard() {
@@ -1010,68 +1025,179 @@ function GroupStudyPage() {
   </StudentDashboardLayout>;
 }
 
-const communityLabels: Record<string, string> = {
-  CURRENT_AFFAIRS: "Current Affairs",
-  VACANCIES: "Vacancies",
-  STUDY_MATERIAL: "Study Material",
-  EXAM_UPDATES: "Exam Updates",
-  GENERAL_DISCUSSION: "General Discussion"
-};
-
 function CommunityPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  const [search, setSearch] = useState("");
-  const [category, setCategory] = useState("");
-  const [reporting, setReporting] = useState<string | null>(null);
-  const { data, isLoading } = useQuery({ queryKey: ["community", search, category], queryFn: () => api<{ posts: CommunityPost[]; categories: string[] }>(`/community/posts?search=${encodeURIComponent(search)}&category=${encodeURIComponent(category)}`) });
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ["community"] });
-  const createPost = useMutation({
-    mutationFn: (values: Record<string, string>) => api("/community/posts", { method: "POST", body: JSON.stringify(values) }),
-    onSuccess: (_, __) => refresh()
+  const [activeChannelId, setActiveChannelId] = useState<string>("");
+  const [message, setMessage] = useState("");
+  const [messageType, setMessageType] = useState<"TEXT" | "VACANCY" | "CURRENT_AFFAIRS" | "EXAM_UPDATE" | "NOTE" | "FILE">("TEXT");
+  const [replyTo, setReplyTo] = useState<CommunityMessage | null>(null);
+  const [attachment, setAttachment] = useState<{ url: string; name: string; mime: string } | null>(null);
+  const [profileUser, setProfileUser] = useState<{ id: string; name: string; role: Role } | null>(null);
+  const [reporting, setReporting] = useState<{ messageId?: string; userId?: string } | null>(null);
+  const { data: channelData, isLoading: channelsLoading } = useQuery({ queryKey: ["community-channels"], queryFn: () => api<{ channels: CommunityChannel[] }>("/community/channels"), refetchInterval: 30_000 });
+  const channels = channelData?.channels || [];
+  const activeChannel = channels.find((channel) => channel.id === activeChannelId) || channels[0];
+  useEffect(() => { if (!activeChannelId && channels[0]) setActiveChannelId(channels[0].id); }, [activeChannelId, channels]);
+  const { data: messageData, isLoading: messagesLoading } = useQuery({
+    queryKey: ["community-messages", activeChannel?.id],
+    queryFn: () => api<{ channel: CommunityChannel; messages: CommunityMessage[] }>(`/community/channels/${activeChannel!.id}/messages`),
+    enabled: Boolean(activeChannel?.id),
+    refetchInterval: 20_000
   });
-  const react = useMutation({ mutationFn: (postId: string) => api(`/community/posts/${postId}/reactions`, { method: "POST" }), onSuccess: refresh });
-  const comment = useMutation({ mutationFn: ({ postId, body }: { postId: string; body: string }) => api(`/community/posts/${postId}/comments`, { method: "POST", body: JSON.stringify({ body }) }), onSuccess: refresh });
-  const report = useMutation({ mutationFn: ({ postId, reason }: { postId: string; reason: string }) => api("/community/reports", { method: "POST", body: JSON.stringify({ postId, reason }) }), onSuccess: () => { setReporting(null); refresh(); } });
-  const block = useMutation({ mutationFn: (userId: string) => api(`/community/block/${userId}`, { method: "POST" }), onSuccess: refresh });
-  const removePost = useMutation({ mutationFn: (postId: string) => api(`/community/posts/${postId}`, { method: "DELETE" }), onSuccess: refresh });
-  const categories = data?.categories || Object.keys(communityLabels);
+  const messages = messageData?.messages || [];
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["community-channels"] });
+    queryClient.invalidateQueries({ queryKey: ["community-messages"] });
+  };
+  const sendMessage = useMutation({
+    mutationFn: () => api(`/community/channels/${activeChannel!.id}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ body: message, type: attachment ? "FILE" : messageType, replyToId: replyTo?.id, attachmentUrl: attachment?.url, attachmentName: attachment?.name, attachmentMime: attachment?.mime })
+    }),
+    onSuccess: () => { setMessage(""); setAttachment(null); setReplyTo(null); setMessageType("TEXT"); refresh(); }
+  });
+  const react = useMutation({ mutationFn: ({ id, emoji }: { id: string; emoji: string }) => api(`/community/messages/${id}/reactions`, { method: "POST", body: JSON.stringify({ emoji }) }), onSuccess: refresh });
+  const removeMessage = useMutation({ mutationFn: (id: string) => api(`/community/messages/${id}`, { method: "DELETE" }), onSuccess: refresh });
+  const direct = useMutation({ mutationFn: (userId: string) => api<CommunityChannel>("/community/direct", { method: "POST", body: JSON.stringify({ userId }) }), onSuccess: (channel) => { setActiveChannelId(channel.id); setProfileUser(null); refresh(); } });
+  const block = useMutation({ mutationFn: (userId: string) => api(`/community/block/${userId}`, { method: "POST" }), onSuccess: () => { setProfileUser(null); refresh(); } });
+  const mute = useMutation({ mutationFn: (userId: string) => api(`/community/mute/${userId}`, { method: "POST" }), onSuccess: () => setProfileUser(null) });
+  const report = useMutation({
+    mutationFn: ({ reason }: { reason: string }) => api("/community/reports", { method: "POST", body: JSON.stringify({ messageId: reporting?.messageId, reportedUserId: reporting?.userId, reason }) }),
+    onSuccess: () => setReporting(null)
+  });
+  const moderateMember = useMutation({
+    mutationFn: ({ userId, action }: { userId: string; action: "REMOVE" | "BAN" }) => api(`/community/channels/${activeChannel!.id}/members/${userId}`, { method: "PATCH", body: JSON.stringify({ action }) }),
+    onSuccess: () => { setProfileUser(null); refresh(); }
+  });
+
+  const chooseFile = (file?: File) => {
+    if (!file) return;
+    if (file.size > 1_500_000) return alert("Please share a file under 1.5 MB.");
+    const reader = new FileReader();
+    reader.onload = () => setAttachment({ url: String(reader.result), name: file.name, mime: file.type || "application/octet-stream" });
+    reader.readAsDataURL(file);
+  };
 
   return <StudentDashboardLayout>
-    <main className="container-app py-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div><span className="eyebrow">Student Community</span><h1 className="mt-1 font-display text-3xl font-extrabold">Community Portal</h1><p className="mt-2 text-sm text-stone-500">Vacancies, exam updates, notes, current affairs, and useful study tips.</p></div>
-        <Link to="/report-issue" className="btn-secondary !px-4 !py-2 text-sm"><ShieldCheck size={16} /> Guidelines</Link>
-      </div>
-
-      <form onSubmit={(event) => { event.preventDefault(); const form = event.currentTarget; createPost.mutate(Object.fromEntries(new FormData(form).entries()) as Record<string, string>); form.reset(); }} className="card mt-5 grid gap-3 p-4">
-        <div className="grid gap-3 sm:grid-cols-[220px_1fr]"><select name="category" className="input" defaultValue="GENERAL_DISCUSSION">{categories.map((item) => <option key={item} value={item}>{communityLabels[item] || item}</option>)}</select><Field label="Post title" name="title" required /></div>
-        <label><span className="label">Post</span><textarea name="body" className="input min-h-24" required placeholder="Share something useful with students" /></label>
-        <div className="flex items-center justify-between"><p className="text-xs text-stone-500">Be respectful. Reports are reviewed by owners and admins.</p><button className="btn-primary !px-4 !py-2 text-sm" disabled={createPost.isPending}><Send size={16} /> Post</button></div>
-      </form>
-
-      <div className="mt-5 grid gap-3 rounded-2xl border bg-white p-3 shadow-soft sm:grid-cols-[1fr_240px] dark:bg-white/5">
-        <label className="flex items-center gap-3 px-2"><Search size={20} className="text-moss" /><input className="w-full bg-transparent py-3 outline-none" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search community" /></label>
-        <select className="input" value={category} onChange={(event) => setCategory(event.target.value)}><option value="">All categories</option>{categories.map((item) => <option key={item} value={item}>{communityLabels[item] || item}</option>)}</select>
-      </div>
-
-      <div className="mt-5 grid gap-4">
-        {isLoading && <p className="card p-6 text-center text-sm text-stone-500">Loading posts...</p>}
-        {data?.posts.map((post) => <article key={post.id} className="card p-4 sm:p-5">
-          <div className="flex items-start justify-between gap-3">
-            <div><span className="rounded-lg bg-moss/10 px-2 py-1 text-xs font-bold text-moss">{communityLabels[post.category]}</span><h2 className="mt-3 font-display text-xl font-extrabold">{post.title}</h2><p className="mt-1 text-xs text-stone-500">{post.author.name} · {new Date(post.createdAt).toLocaleString()}</p></div>
-            <div className="flex gap-1"><button onClick={() => setReporting(post.id)} className="grid h-9 w-9 place-items-center rounded-xl border" aria-label="Report post"><Flag size={16} /></button>{post.author.id !== user?.id && <button onClick={() => block.mutate(post.author.id)} className="grid h-9 w-9 place-items-center rounded-xl border" aria-label="Block user"><Ban size={16} /></button>}{["OWNER", "ADMIN"].includes(user?.role || "") && <button onClick={() => removePost.mutate(post.id)} className="grid h-9 w-9 place-items-center rounded-xl border text-red-600" aria-label="Delete post"><Trash2 size={16} /></button>}</div>
+    <main className="h-[calc(100vh-82px)] bg-[#eef1ee] p-0 dark:bg-[#0d130f] md:h-screen md:p-5">
+      <div className="mx-auto grid h-full max-w-7xl overflow-hidden border bg-white shadow-soft dark:bg-[#111713] md:rounded-3xl lg:grid-cols-[320px_1fr]">
+        <aside className="hidden border-r bg-[#f8f8f5] dark:bg-white/[.03] lg:block">
+          <div className="border-b p-4">
+            <div className="flex items-center justify-between"><div><p className="text-xs font-bold uppercase tracking-[.16em] text-moss">Community</p><h1 className="font-display text-2xl font-extrabold">Student Chats</h1></div><NotificationBell /></div>
+            <p className="mt-2 text-sm text-stone-500">Global, library-wise groups and private direct messages.</p>
           </div>
-          <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-stone-600 dark:text-stone-300">{post.body}</p>
-          <div className="mt-4 flex flex-wrap items-center gap-2"><button onClick={() => react.mutate(post.id)} className="btn-secondary !px-3 !py-2 text-sm"><ThumbsUp size={16} /> {post._count?.reactions ?? post.reactions.length}</button><span className="text-sm text-stone-500">{post._count?.comments ?? post.comments.length} comments</span></div>
-          {reporting === post.id && <form onSubmit={(event) => { event.preventDefault(); const reason = String(new FormData(event.currentTarget).get("reason") || ""); report.mutate({ postId: post.id, reason }); }} className="mt-3 flex gap-2"><input name="reason" className="input" placeholder="Reason for report" required /><button className="btn-primary !px-4 !py-2">Report</button></form>}
-          <div className="mt-4 grid gap-2">{post.comments.map((entry) => <div key={entry.id} className="rounded-xl bg-stone-50 p-3 text-sm dark:bg-white/5"><p className="font-bold">{entry.author.name}</p><p className="mt-1 text-stone-600 dark:text-stone-300">{entry.body}</p></div>)}</div>
-          <form onSubmit={(event) => { event.preventDefault(); const form = event.currentTarget; const body = String(new FormData(form).get("body") || ""); comment.mutate({ postId: post.id, body }); form.reset(); }} className="mt-3 flex gap-2"><input name="body" className="input" placeholder="Add a comment" required /><button className="btn-secondary !px-4 !py-2"><Send size={16} /></button></form>
-        </article>)}
-        {!isLoading && !data?.posts.length && <Empty icon={<MessageSquare />} title="No community posts" text="Start a useful discussion for other students." />}
+          <div className="max-h-[calc(100vh-150px)] overflow-y-auto p-3">
+            {channelsLoading && <p className="p-4 text-sm text-stone-500">Loading groups...</p>}
+            {channels.map((channel) => <button key={channel.id} onClick={() => setActiveChannelId(channel.id)} className={`mb-2 flex w-full items-center gap-3 rounded-2xl p-3 text-left transition ${activeChannel?.id === channel.id ? "bg-ink text-white" : "hover:bg-stone-100 dark:hover:bg-white/5"}`}>
+              <ChannelIcon channel={channel} />
+              <span className="min-w-0 flex-1"><span className="block truncate text-sm font-extrabold">{directChannelName(channel, user?.id)}</span><span className={`block truncate text-xs ${activeChannel?.id === channel.id ? "text-white/65" : "text-stone-500"}`}>{channel.latestMessage?.body || channel.description || "No messages yet"}</span></span>
+              {Boolean(channel.unreadCount) && <span className="grid min-h-6 min-w-6 place-items-center rounded-full bg-red-500 px-1 text-[11px] font-bold text-white">{Math.min(channel.unreadCount || 0, 99)}</span>}
+            </button>)}
+          </div>
+        </aside>
+
+        <section className="flex min-w-0 flex-col">
+          <header className="flex min-h-16 items-center gap-3 border-b bg-white/95 px-3 backdrop-blur dark:bg-[#111713]/95 sm:px-4">
+            <select className="input max-w-[44vw] !py-2 lg:hidden" value={activeChannel?.id || ""} onChange={(event) => setActiveChannelId(event.target.value)}>
+              {channels.map((channel) => <option key={channel.id} value={channel.id}>{directChannelName(channel, user?.id)}</option>)}
+            </select>
+            {activeChannel && <><ChannelIcon channel={activeChannel} /><div className="min-w-0 flex-1"><h2 className="truncate font-display text-lg font-extrabold">{directChannelName(activeChannel, user?.id)}</h2><p className="truncate text-xs text-stone-500">{activeChannel.type === "GLOBAL" ? "Mathura Community" : activeChannel.type === "LIBRARY" ? "Library-wise Group" : "Private Direct Message"} · {activeChannel.members?.length || 0} members</p></div></>}
+            <Link to="/report-issue" className="grid h-10 w-10 place-items-center rounded-xl border" aria-label="Community safety"><ShieldCheck size={18} /></Link>
+          </header>
+
+          <div className="flex-1 overflow-y-auto bg-[linear-gradient(rgba(47,107,79,.05)_1px,transparent_1px),linear-gradient(90deg,rgba(47,107,79,.05)_1px,transparent_1px)] bg-[size:28px_28px] p-3 sm:p-5">
+            {messagesLoading && <p className="mx-auto mt-10 rounded-2xl bg-white p-4 text-center text-sm text-stone-500 shadow-soft dark:bg-[#111713]">Loading messages...</p>}
+            <div className="mx-auto flex max-w-3xl flex-col gap-3">
+              {messages.map((entry) => <ChatBubble key={entry.id} message={entry} mine={entry.senderId === user?.id} userId={user?.id || ""} canModerate={["OWNER", "ADMIN"].includes(user?.role || "")} onReply={setReplyTo} onReact={(emoji) => react.mutate({ id: entry.id, emoji })} onDelete={() => removeMessage.mutate(entry.id)} onProfile={() => setProfileUser(entry.sender)} onReport={() => setReporting({ messageId: entry.id, userId: entry.senderId })} />)}
+              {!messages.length && !messagesLoading && <div className="mx-auto mt-10 max-w-sm rounded-3xl border bg-white p-6 text-center shadow-soft dark:bg-[#111713]"><MessageSquare className="mx-auto text-moss" size={30} /><h3 className="mt-3 font-display text-xl font-extrabold">Start the conversation</h3><p className="mt-1 text-sm text-stone-500">Send a message, notes, updates, vacancy information, current affairs, photos, videos or PDFs.</p></div>}
+              {messages.length > 0 && <div className="ml-10 flex items-center gap-2 text-xs font-semibold text-stone-400"><span className="flex gap-1 rounded-full bg-white px-3 py-2 shadow-soft dark:bg-[#111713]"><span className="typing-dot" /><span className="typing-dot animation-delay-150" /><span className="typing-dot animation-delay-300" /></span> Students are typing</div>}
+            </div>
+          </div>
+
+          <footer className="border-t bg-white p-3 dark:bg-[#111713]">
+            {replyTo && <div className="mb-2 flex items-center justify-between rounded-2xl border-l-4 border-moss bg-stone-50 px-3 py-2 text-sm dark:bg-white/5"><span className="truncate"><b>Replying to {replyTo.sender.name}:</b> {replyTo.body || replyTo.attachmentName || "Attachment"}</span><button onClick={() => setReplyTo(null)} className="grid h-8 w-8 place-items-center rounded-xl"><X size={16} /></button></div>}
+            {attachment && <div className="mb-2 flex items-center justify-between rounded-2xl border bg-stone-50 px-3 py-2 text-sm dark:bg-white/5"><span className="truncate"><Paperclip size={15} className="mr-1 inline" />{attachment.name}</span><button onClick={() => setAttachment(null)} className="grid h-8 w-8 place-items-center rounded-xl"><X size={16} /></button></div>}
+            <form onSubmit={(event) => { event.preventDefault(); if (message.trim() || attachment) sendMessage.mutate(); }} className="flex items-end gap-2">
+              <label className="grid h-11 w-11 shrink-0 cursor-pointer place-items-center rounded-2xl border bg-white dark:bg-white/5" aria-label="Attach file"><Paperclip size={19} /><input type="file" className="hidden" accept="image/*,video/*,.pdf,.doc,.docx,.txt" onChange={(event) => chooseFile(event.target.files?.[0])} /></label>
+              <select value={messageType} onChange={(event) => setMessageType(event.target.value as typeof messageType)} className="hidden h-11 rounded-2xl border bg-white px-2 text-xs font-bold outline-none dark:bg-white/5 sm:block"><option value="TEXT">Chat</option><option value="VACANCY">Vacancy</option><option value="CURRENT_AFFAIRS">Current affairs</option><option value="EXAM_UPDATE">Exam update</option><option value="NOTE">Notes</option></select>
+              <textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={1} className="max-h-32 min-h-11 flex-1 resize-none rounded-2xl border bg-stone-50 px-4 py-3 text-sm outline-none focus:border-moss dark:bg-white/5" placeholder={activeChannel?.type === "DIRECT" ? "Message privately..." : "Message the group..."} />
+              <button disabled={sendMessage.isPending || (!message.trim() && !attachment)} className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-moss text-white disabled:opacity-50" aria-label="Send message"><Send size={19} /></button>
+            </form>
+          </footer>
+        </section>
       </div>
+
+      {profileUser && <div className="fixed inset-0 z-[60] bg-black/30 p-4 backdrop-blur-sm" onClick={() => setProfileUser(null)}><div onClick={(event) => event.stopPropagation()} className="ml-auto h-full max-w-sm rounded-3xl bg-white p-5 shadow-soft dark:bg-[#111713]">
+        <div className="flex items-center justify-between"><h2 className="font-display text-xl font-extrabold">Student Profile</h2><button onClick={() => setProfileUser(null)} className="grid h-10 w-10 place-items-center rounded-xl border"><X size={18} /></button></div>
+        <div className="mt-6 text-center"><Avatar user={profileUser} size="lg" /><h3 className="mt-3 font-display text-2xl font-extrabold">{profileUser.name}</h3><p className="mt-1 text-sm font-semibold text-stone-500">{profileUser.role}</p></div>
+        {profileUser.id !== user?.id && <div className="mt-6 grid gap-2">
+          <button onClick={() => direct.mutate(profileUser.id)} className="btn-primary w-full"><MessageCircle size={17} /> Start private chat</button>
+          <button onClick={() => setReporting({ userId: profileUser.id })} className="btn-secondary w-full"><Flag size={17} /> Report user</button>
+          <button onClick={() => mute.mutate(profileUser.id)} className="btn-secondary w-full"><Bell size={17} /> Mute user</button>
+          <button onClick={() => block.mutate(profileUser.id)} className="btn-secondary w-full text-red-600"><Ban size={17} /> Block user</button>
+          {["OWNER", "ADMIN"].includes(user?.role || "") && activeChannel?.type !== "DIRECT" && <><button onClick={() => moderateMember.mutate({ userId: profileUser.id, action: "REMOVE" })} className="btn-secondary w-full"><UserCircle size={17} /> Remove member</button><button onClick={() => moderateMember.mutate({ userId: profileUser.id, action: "BAN" })} className="btn-secondary w-full text-red-600"><ShieldAlert size={17} /> Ban user</button></>}
+        </div>}
+      </div></div>}
+
+      {reporting && <div className="fixed inset-0 z-[70] grid place-items-center bg-black/30 p-4 backdrop-blur-sm"><form onSubmit={(event) => { event.preventDefault(); report.mutate({ reason: String(new FormData(event.currentTarget).get("reason") || "") }); }} className="w-full max-w-md rounded-3xl bg-white p-5 shadow-soft dark:bg-[#111713]">
+        <div className="flex items-center justify-between"><h2 className="font-display text-xl font-extrabold">Report safety concern</h2><button type="button" onClick={() => setReporting(null)} className="grid h-10 w-10 place-items-center rounded-xl border"><X size={18} /></button></div>
+        <textarea name="reason" className="input mt-4 min-h-28" placeholder="Tell the moderation team what happened" required />
+        <button disabled={report.isPending} className="btn-primary mt-4 w-full"><Flag size={17} /> Submit report</button>
+      </form></div>}
     </main>
   </StudentDashboardLayout>;
+}
+
+function ChannelIcon({ channel }: { channel: CommunityChannel }) {
+  const icon = channel.type === "GLOBAL" ? <Megaphone size={18} /> : channel.type === "DIRECT" ? <MessageCircle size={18} /> : <Users size={18} />;
+  return <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-2xl text-white ${channel.type === "GLOBAL" ? "bg-[#2563eb]" : channel.type === "DIRECT" ? "bg-[#6d45c2]" : "bg-moss"}`}>{icon}</span>;
+}
+
+function directChannelName(channel: CommunityChannel, currentUserId?: string) {
+  if (channel.type !== "DIRECT") return channel.name;
+  return channel.members?.map((member) => member.user).find((member) => member.id !== currentUserId)?.name || "Direct Message";
+}
+
+function Avatar({ user, size = "sm" }: { user: { name: string; role?: Role }; size?: "sm" | "lg" }) {
+  const initials = user.name.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase();
+  return <span className={`mx-auto grid shrink-0 place-items-center rounded-full bg-ink font-extrabold text-white ${size === "lg" ? "h-20 w-20 text-2xl" : "h-9 w-9 text-xs"}`}>{initials}</span>;
+}
+
+function ChatBubble({ message, mine, userId, canModerate, onReply, onReact, onDelete, onProfile, onReport }: { message: CommunityMessage; mine: boolean; userId: string; canModerate: boolean; onReply: (message: CommunityMessage) => void; onReact: (emoji: string) => void; onDelete: () => void; onProfile: () => void; onReport: () => void }) {
+  const reactionSummary = Object.entries(message.reactions.reduce<Record<string, number>>((acc, reaction) => ({ ...acc, [reaction.emoji]: (acc[reaction.emoji] || 0) + 1 }), {}));
+  return <div className={`flex gap-2 ${mine ? "justify-end" : "justify-start"}`}>
+    {!mine && <button onClick={onProfile} className="mt-1"><Avatar user={message.sender} /></button>}
+    <div className={`group max-w-[82%] sm:max-w-[70%] ${mine ? "items-end" : "items-start"} flex flex-col`}>
+      {!mine && <button onClick={onProfile} className="mb-1 text-left text-xs font-bold text-stone-500">{message.sender.name}</button>}
+      <div className={`rounded-3xl px-4 py-3 shadow-sm ${mine ? "rounded-br-md bg-moss text-white" : "rounded-bl-md bg-white text-ink dark:bg-[#18211b] dark:text-white"}`}>
+        {message.replyTo && <div className={`mb-2 rounded-2xl border-l-4 px-3 py-2 text-xs ${mine ? "border-white/70 bg-white/10 text-white/80" : "border-moss bg-stone-50 text-stone-500 dark:bg-white/5"}`}><b>{message.replyTo.sender.name}</b><p className="truncate">{message.replyTo.body || message.replyTo.attachmentName || "Attachment"}</p></div>}
+        {message.isDeleted ? <p className="italic opacity-70">Message deleted</p> : <>
+          {message.type !== "TEXT" && <span className={`mb-2 inline-flex rounded-full px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide ${mine ? "bg-white/15" : "bg-moss/10 text-moss"}`}>{message.type.replace("_", " ")}</span>}
+          {message.body && <p className="whitespace-pre-wrap text-sm leading-6">{message.body}</p>}
+          {message.attachmentUrl && <AttachmentPreview message={message} mine={mine} />}
+        </>}
+        <div className={`mt-1 text-right text-[10px] font-semibold ${mine ? "text-white/65" : "text-stone-400"}`}>{new Date(message.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
+      </div>
+      {reactionSummary.length > 0 && <div className="mt-1 flex flex-wrap gap-1">{reactionSummary.map(([emoji, count]) => <button key={emoji} onClick={() => onReact(emoji)} className="rounded-full border bg-white px-2 py-0.5 text-xs shadow-sm dark:bg-[#111713]">{emoji} {count}</button>)}</div>}
+      <div className="mt-1 flex gap-1 opacity-100 sm:opacity-0 sm:transition sm:group-hover:opacity-100">
+        {["👍", "❤️", "📚"].map((emoji) => <button key={emoji} onClick={() => onReact(emoji)} className="grid h-8 w-8 place-items-center rounded-full border bg-white text-sm dark:bg-[#111713]" aria-label={`React ${emoji}`}>{emoji}</button>)}
+        <button onClick={() => onReply(message)} className="grid h-8 w-8 place-items-center rounded-full border bg-white dark:bg-[#111713]" aria-label="Reply"><Reply size={14} /></button>
+        {!mine && <button onClick={onReport} className="grid h-8 w-8 place-items-center rounded-full border bg-white dark:bg-[#111713]" aria-label="Report message"><Flag size={14} /></button>}
+        {(mine || canModerate) && <button onClick={onDelete} className="grid h-8 w-8 place-items-center rounded-full border bg-white text-red-600 dark:bg-[#111713]" aria-label="Delete message"><Trash2 size={14} /></button>}
+      </div>
+    </div>
+    {mine && <Avatar user={{ name: "You" }} />}
+  </div>;
+}
+
+function AttachmentPreview({ message, mine }: { message: CommunityMessage; mine: boolean }) {
+  const mime = message.attachmentMime || "";
+  const base = mine ? "bg-white/10 text-white" : "bg-stone-50 text-ink dark:bg-white/5 dark:text-white";
+  if (mime.startsWith("image/")) return <img src={message.attachmentUrl || ""} alt={message.attachmentName || "Shared image"} className="mt-2 max-h-64 rounded-2xl object-cover" />;
+  if (mime.startsWith("video/")) return <video src={message.attachmentUrl || ""} controls className="mt-2 max-h-64 rounded-2xl" />;
+  const icon = mime.includes("pdf") ? <FileText size={18} /> : mime.startsWith("video/") ? <Video size={18} /> : <Paperclip size={18} />;
+  return <a href={message.attachmentUrl || "#"} download={message.attachmentName} className={`mt-2 flex items-center gap-2 rounded-2xl p-3 text-sm font-bold ${base}`}>{icon}<span className="truncate">{message.attachmentName || "Download file"}</span></a>;
 }
 
 function ReportIssuePage() {

@@ -44,9 +44,9 @@ if (env.CLOUDINARY_CLOUD_NAME) {
   });
 }
 
-const communityCategories = ["CURRENT_AFFAIRS", "VACANCIES", "STUDY_MATERIAL", "EXAM_UPDATES", "GENERAL_DISCUSSION"] as const;
 const complaintCategories = ["AC Issue", "WiFi Issue", "Seat Issue", "Cleanliness", "Noise", "Other"] as const;
 const libraryImageTypes = ["EXTERIOR", "STUDY_HALL", "SEAT", "FACILITIES", "OTHER"] as const;
+const communityMessageTypes = ["TEXT", "VACANCY", "CURRENT_AFFAIRS", "EXAM_UPDATE", "NOTE", "FILE"] as const;
 
 function mapsLink(library: { latitude?: number | null; longitude?: number | null; address: string; city: string; state: string }) {
   if (library.latitude != null && library.longitude != null) return `https://www.google.com/maps/search/?api=1&query=${library.latitude},${library.longitude}`;
@@ -68,6 +68,34 @@ async function canReviewLibrary(studentId: string, libraryId: string) {
     prisma.attendance.findFirst({ where: { membership: { studentId, libraryId } }, select: { id: true } })
   ]);
   return Boolean(membership || booking || attendance);
+}
+
+async function ensureCommunityChannels(userId: string) {
+  const global = await prisma.communityChannel.upsert({
+    where: { id: "global-community" },
+    create: { id: "global-community", type: "GLOBAL", name: "Mathura Community", description: "City-wide student updates, notes, vacancies and exam chatter." },
+    update: {},
+    include: { members: true }
+  });
+  await prisma.communityChannelMember.upsert({ where: { channelId_userId: { channelId: global.id, userId } }, create: { channelId: global.id, userId }, update: { isRemoved: false } });
+
+  const memberships = await prisma.studentMembership.findMany({ where: { studentId: userId, status: "ACTIVE" }, include: { library: true } });
+  for (const membership of memberships) {
+    const channel = await prisma.communityChannel.upsert({
+      where: { id: `library-${membership.libraryId}` },
+      create: { id: `library-${membership.libraryId}`, type: "LIBRARY", name: `${membership.library.name} Group`, description: "Library members, announcements, seat updates and daily coordination.", libraryId: membership.libraryId },
+      update: { name: `${membership.library.name} Group`, libraryId: membership.libraryId }
+    });
+    await prisma.communityChannelMember.upsert({ where: { channelId_userId: { channelId: channel.id, userId } }, create: { channelId: channel.id, userId }, update: { isRemoved: false } });
+  }
+}
+
+async function canAccessChannel(userId: string, channelId: string) {
+  const channel = await prisma.communityChannel.findUnique({ where: { id: channelId } });
+  if (!channel) return null;
+  if (channel.type === "GLOBAL") return channel;
+  const member = await prisma.communityChannelMember.findUnique({ where: { channelId_userId: { channelId, userId } } });
+  return member && !member.isRemoved && !member.isBanned ? channel : null;
 }
 
 app.get("/api/health", (_req, res) => res.json({ status: "ok", service: "bookmyseat-api" }));
@@ -860,67 +888,121 @@ app.patch("/api/admin/users/:id/status", authenticate, allow("ADMIN"), asyncRout
   res.json(await prisma.user.update({ where: { id: String(req.params.id) }, data: { status }, select: { id: true, status: true } }));
 }));
 
-app.get("/api/community/posts", authenticate, asyncRoute(async (req, res) => {
-  const search = String(req.query.search ?? "").trim();
-  const category = String(req.query.category ?? "").trim();
-  const blocked = await prisma.userBlock.findMany({ where: { blockerId: req.user!.id }, select: { blockedId: true } });
-  const blockedIds = blocked.map((item) => item.blockedId);
-  const posts = await prisma.communityPost.findMany({
-    where: {
-      isDeleted: false,
-      authorId: blockedIds.length ? { notIn: blockedIds } : undefined,
-      ...(communityCategories.includes(category as typeof communityCategories[number]) ? { category: category as typeof communityCategories[number] } : {}),
-      ...(search ? { OR: [{ title: { contains: search } }, { body: { contains: search } }] } : {})
-    },
+app.get("/api/community/channels", authenticate, allow("STUDENT", "OWNER", "ADMIN"), asyncRoute(async (req, res) => {
+  await ensureCommunityChannels(req.user!.id);
+  const memberships = await prisma.communityChannelMember.findMany({
+    where: { userId: req.user!.id, isRemoved: false, isBanned: false },
     include: {
-      author: { select: { id: true, name: true, role: true } },
-      comments: { where: { isDeleted: false }, include: { author: { select: { id: true, name: true, role: true } } }, orderBy: { createdAt: "asc" }, take: 5 },
-      reactions: true,
-      _count: { select: { comments: true, reactions: true, reports: true } }
+      channel: {
+        include: {
+          library: { select: { id: true, name: true, area: true, city: true } },
+          members: { where: { isRemoved: false, isBanned: false }, include: { user: { select: { id: true, name: true, role: true } } }, take: 24 },
+          messages: {
+            where: { isDeleted: false },
+            include: { sender: { select: { id: true, name: true, role: true } } },
+            orderBy: { createdAt: "desc" },
+            take: 1
+          }
+        }
+      }
     },
-    orderBy: { createdAt: "desc" },
-    take: 50
+    orderBy: { createdAt: "asc" }
   });
-  res.json({ posts, categories: communityCategories });
+  const channels = await Promise.all(memberships.map(async (membership) => ({
+    ...membership.channel,
+    latestMessage: membership.channel.messages[0] ?? null,
+    unreadCount: await prisma.communityMessage.count({
+      where: {
+        channelId: membership.channelId,
+        senderId: { not: req.user!.id },
+        isDeleted: false,
+        ...(membership.lastReadAt ? { createdAt: { gt: membership.lastReadAt } } : {})
+      }
+    })
+  })));
+  res.json({ channels });
 }));
 
-app.post("/api/community/posts", authenticate, allow("STUDENT", "OWNER", "ADMIN"), asyncRoute(async (req, res) => {
+app.get("/api/community/channels/:id/messages", authenticate, allow("STUDENT", "OWNER", "ADMIN"), asyncRoute(async (req, res) => {
+  const channelId = String(req.params.id);
+  const channel = await canAccessChannel(req.user!.id, channelId);
+  if (!channel) return res.status(404).json({ message: "Channel not found" });
+  const blocked = await prisma.userBlock.findMany({ where: { blockerId: req.user!.id }, select: { blockedId: true } });
+  const muted = await prisma.userMute.findMany({ where: { muterId: req.user!.id }, select: { mutedId: true } });
+  const hiddenUserIds = [...blocked.map((item) => item.blockedId), ...muted.map((item) => item.mutedId)];
+  const messages = await prisma.communityMessage.findMany({
+    where: { channelId, senderId: hiddenUserIds.length ? { notIn: hiddenUserIds } : undefined },
+    include: {
+      sender: { select: { id: true, name: true, role: true } },
+      replyTo: { include: { sender: { select: { id: true, name: true, role: true } } } },
+      reactions: { include: { user: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }
+    },
+    orderBy: { createdAt: "asc" },
+    take: 100
+  });
+  await prisma.communityChannelMember.update({
+    where: { channelId_userId: { channelId, userId: req.user!.id } },
+    data: { lastReadAt: new Date() }
+  }).catch(() => undefined);
+  res.json({ channel, messages });
+}));
+
+app.post("/api/community/channels/:id/messages", authenticate, allow("STUDENT", "OWNER", "ADMIN"), asyncRoute(async (req, res) => {
+  const channelId = String(req.params.id);
+  const channel = await canAccessChannel(req.user!.id, channelId);
+  if (!channel) return res.status(404).json({ message: "Channel not found" });
   const data = z.object({
-    category: z.enum(communityCategories),
-    title: z.string().min(3).max(140),
-    body: z.string().min(5).max(4000)
-  }).parse(req.body);
-  const post = await prisma.communityPost.create({
-    data: { ...data, authorId: req.user!.id },
-    include: { author: { select: { id: true, name: true, role: true } }, comments: true, reactions: true, _count: { select: { comments: true, reactions: true, reports: true } } }
+    body: z.string().max(4000).optional(),
+    type: z.enum(communityMessageTypes).default("TEXT"),
+    replyToId: z.string().optional(),
+    attachmentUrl: z.string().max(2_000_000).optional(),
+    attachmentName: z.string().max(240).optional(),
+    attachmentMime: z.string().max(120).optional()
+  }).refine((value) => value.body?.trim() || value.attachmentUrl, "Message text or attachment is required").parse(req.body);
+  if (data.replyToId) {
+    const reply = await prisma.communityMessage.findFirst({ where: { id: data.replyToId, channelId } });
+    if (!reply) return res.status(400).json({ message: "Reply message is not in this channel" });
+  }
+  const message = await prisma.communityMessage.create({
+    data: { ...data, body: data.body?.trim(), channelId, senderId: req.user!.id },
+    include: { sender: { select: { id: true, name: true, role: true } }, replyTo: { include: { sender: { select: { id: true, name: true, role: true } } } }, reactions: true }
   });
-  res.status(201).json(post);
+  res.status(201).json(message);
 }));
 
-app.post("/api/community/posts/:id/comments", authenticate, allow("STUDENT", "OWNER", "ADMIN"), asyncRoute(async (req, res) => {
-  const data = z.object({ body: z.string().min(2).max(1200) }).parse(req.body);
-  const post = await prisma.communityPost.findFirst({ where: { id: String(req.params.id), isDeleted: false } });
-  if (!post) return res.status(404).json({ message: "Post not found" });
-  const comment = await prisma.communityComment.create({ data: { postId: post.id, authorId: req.user!.id, body: data.body }, include: { author: { select: { id: true, name: true, role: true } } } });
-  res.status(201).json(comment);
+app.post("/api/community/direct", authenticate, allow("STUDENT", "OWNER", "ADMIN"), asyncRoute(async (req, res) => {
+  const data = z.object({ userId: z.string() }).parse(req.body);
+  if (data.userId === req.user!.id) return res.status(400).json({ message: "You cannot message yourself." });
+  const other = await prisma.user.findUnique({ where: { id: data.userId }, select: { id: true, name: true } });
+  if (!other) return res.status(404).json({ message: "User not found" });
+  const [a, b] = [req.user!.id, other.id].sort();
+  const channel = await prisma.communityChannel.upsert({
+    where: { id: `direct-${a}-${b}` },
+    create: { id: `direct-${a}-${b}`, type: "DIRECT", name: other.name, description: "Private direct conversation" },
+    update: {}
+  });
+  await prisma.communityChannelMember.upsert({ where: { channelId_userId: { channelId: channel.id, userId: req.user!.id } }, create: { channelId: channel.id, userId: req.user!.id }, update: { isRemoved: false, isBanned: false } });
+  await prisma.communityChannelMember.upsert({ where: { channelId_userId: { channelId: channel.id, userId: other.id } }, create: { channelId: channel.id, userId: other.id }, update: { isRemoved: false, isBanned: false } });
+  res.status(201).json(channel);
 }));
 
-app.post("/api/community/posts/:id/reactions", authenticate, allow("STUDENT", "OWNER", "ADMIN"), asyncRoute(async (req, res) => {
-  const post = await prisma.communityPost.findFirst({ where: { id: String(req.params.id), isDeleted: false } });
-  if (!post) return res.status(404).json({ message: "Post not found" });
-  const key = { postId_userId_type: { postId: post.id, userId: req.user!.id, type: "LIKE" } };
-  const existing = await prisma.communityReaction.findUnique({ where: key });
+app.post("/api/community/messages/:id/reactions", authenticate, allow("STUDENT", "OWNER", "ADMIN"), asyncRoute(async (req, res) => {
+  const data = z.object({ emoji: z.string().min(1).max(16).default("👍") }).parse(req.body);
+  const message = await prisma.communityMessage.findUnique({ where: { id: String(req.params.id) } });
+  if (!message || !(await canAccessChannel(req.user!.id, message.channelId))) return res.status(404).json({ message: "Message not found" });
+  const key = { messageId_userId_emoji: { messageId: message.id, userId: req.user!.id, emoji: data.emoji } };
+  const existing = await prisma.communityMessageReaction.findUnique({ where: key });
   if (existing) {
-    await prisma.communityReaction.delete({ where: key });
+    await prisma.communityMessageReaction.delete({ where: key });
     return res.json({ reacted: false });
   }
-  await prisma.communityReaction.create({ data: { postId: post.id, userId: req.user!.id, type: "LIKE" } });
+  await prisma.communityMessageReaction.create({ data: { messageId: message.id, userId: req.user!.id, emoji: data.emoji } });
   res.status(201).json({ reacted: true });
 }));
 
 app.post("/api/community/reports", authenticate, allow("STUDENT", "OWNER", "ADMIN"), asyncRoute(async (req, res) => {
-  const data = z.object({ postId: z.string().optional(), commentId: z.string().optional(), reason: z.string().min(3).max(500) }).refine((value) => value.postId || value.commentId, "Report a post or comment").parse(req.body);
-  const report = await prisma.communityReport.create({ data: { reporterId: req.user!.id, postId: data.postId, commentId: data.commentId, reason: data.reason } });
+  const data = z.object({ messageId: z.string().optional(), reportedUserId: z.string().optional(), reason: z.string().min(3).max(500) }).refine((value) => value.messageId || value.reportedUserId, "Report a message or user").parse(req.body);
+  const report = await prisma.communityReport.create({ data: { reporterId: req.user!.id, messageId: data.messageId, reportedUserId: data.reportedUserId, reason: data.reason } });
   res.status(201).json(report);
 }));
 
@@ -931,12 +1013,29 @@ app.post("/api/community/block/:userId", authenticate, allow("STUDENT", "OWNER",
   res.status(201).json({ blocked: true });
 }));
 
-app.delete("/api/community/posts/:id", authenticate, allow("OWNER", "ADMIN"), asyncRoute(async (req, res) => {
-  res.json(await prisma.communityPost.update({ where: { id: String(req.params.id) }, data: { isDeleted: true } }));
+app.post("/api/community/mute/:userId", authenticate, allow("STUDENT", "OWNER", "ADMIN"), asyncRoute(async (req, res) => {
+  const mutedId = String(req.params.userId);
+  if (mutedId === req.user!.id) return res.status(400).json({ message: "You cannot mute yourself." });
+  await prisma.userMute.upsert({ where: { muterId_mutedId: { muterId: req.user!.id, mutedId } }, create: { muterId: req.user!.id, mutedId }, update: {} });
+  res.status(201).json({ muted: true });
 }));
 
-app.delete("/api/community/comments/:id", authenticate, allow("OWNER", "ADMIN"), asyncRoute(async (req, res) => {
-  res.json(await prisma.communityComment.update({ where: { id: String(req.params.id) }, data: { isDeleted: true } }));
+app.delete("/api/community/messages/:id", authenticate, allow("STUDENT", "OWNER", "ADMIN"), asyncRoute(async (req, res) => {
+  const message = await prisma.communityMessage.findUnique({ where: { id: String(req.params.id) }, include: { channel: true } });
+  if (!message) return res.status(404).json({ message: "Message not found" });
+  const canModerate = ["OWNER", "ADMIN"].includes(req.user!.role) || message.senderId === req.user!.id;
+  if (!canModerate) return res.status(403).json({ message: "Only the sender, owners, or admins can delete this message." });
+  res.json(await prisma.communityMessage.update({ where: { id: message.id }, data: { isDeleted: true, body: null, attachmentUrl: null, attachmentName: null, attachmentMime: null } }));
+}));
+
+app.patch("/api/community/channels/:channelId/members/:userId", authenticate, allow("OWNER", "ADMIN"), asyncRoute(async (req, res) => {
+  const data = z.object({ action: z.enum(["REMOVE", "BAN", "RESTORE"]) }).parse(req.body);
+  const member = await prisma.communityChannelMember.findUnique({ where: { channelId_userId: { channelId: String(req.params.channelId), userId: String(req.params.userId) } } });
+  if (!member) return res.status(404).json({ message: "Member not found" });
+  res.json(await prisma.communityChannelMember.update({
+    where: { id: member.id },
+    data: data.action === "BAN" ? { isBanned: true, isRemoved: true } : data.action === "REMOVE" ? { isRemoved: true } : { isRemoved: false, isBanned: false }
+  }));
 }));
 
 app.get("/api/community/moderation", authenticate, allow("OWNER", "ADMIN"), asyncRoute(async (_req, res) => {
@@ -944,8 +1043,7 @@ app.get("/api/community/moderation", authenticate, allow("OWNER", "ADMIN"), asyn
     where: { status: { in: ["OPEN", "IN_REVIEW"] } },
     include: {
       reporter: { select: { name: true, email: true } },
-      post: { include: { author: { select: { name: true, email: true, status: true } } } },
-      comment: { include: { author: { select: { name: true, email: true, status: true } } } }
+      message: { include: { sender: { select: { id: true, name: true, email: true, status: true } }, channel: { select: { name: true, type: true } } } }
     },
     orderBy: { createdAt: "desc" }
   });
