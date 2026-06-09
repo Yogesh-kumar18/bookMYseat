@@ -1,4 +1,5 @@
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
+const configuredApiUrl = import.meta.env.VITE_API_URL;
+const API_URL = configuredApiUrl || (import.meta.env.PROD ? "" : "http://localhost:4000/api");
 
 export type Role = "STUDENT" | "OWNER" | "ADMIN";
 export type User = { id: string; name: string; email: string; phone?: string; role: Role; isPro: boolean };
@@ -11,6 +12,7 @@ export type Library = {
 };
 
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
+  if (!API_URL) throw new Error("VITE_API_URL is required in production.");
   const token = localStorage.getItem("bms_token");
   const headers = new Headers(options.headers);
   if (!(options.body instanceof FormData)) headers.set("Content-Type", "application/json");

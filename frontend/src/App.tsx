@@ -3,12 +3,13 @@ import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams, use
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRight, BarChart3, Bell, BookOpen, Building2, Check, ChevronRight, Clock3, Flame, Heart,
-  IndianRupee, LayoutDashboard, LogOut, MapPin, Menu, Moon, Phone, Search, ShieldCheck, Sparkles,
+  Download, IndianRupee, LayoutDashboard, LogOut, MapPin, Menu, Moon, Phone, Search, ShieldCheck, Sparkles,
   Star, Sun, TimerReset, Upload, Users, X, Plus, Trash2, MessageSquare, UserPlus, CheckCircle2,
   AlertCircle, BookMarked, Settings, Home as HomeIcon, Zap
 } from "lucide-react";
 import { api, type Library, type Role } from "./api";
 import { AuthProvider, useAuth } from "./auth";
+import { isIosSafari, isStandaloneDisplay, type BeforeInstallPromptEvent } from "./pwa";
 
 const money = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 });
 
@@ -34,6 +35,51 @@ function NotificationBell() {
   </Link>;
 }
 
+function InstallPrompt() {
+  const [prompt, setPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [showIosHint, setShowIosHint] = useState(false);
+  const [dismissed, setDismissed] = useState(() => localStorage.getItem("bms_install_prompt_dismissed") === "true");
+
+  useEffect(() => {
+    if (isStandaloneDisplay() || dismissed) return;
+
+    const handlePrompt = (event: Event) => {
+      event.preventDefault();
+      setPrompt(event as BeforeInstallPromptEvent);
+    };
+
+    window.addEventListener("beforeinstallprompt", handlePrompt);
+    setShowIosHint(isIosSafari());
+
+    return () => window.removeEventListener("beforeinstallprompt", handlePrompt);
+  }, [dismissed]);
+
+  if (dismissed || isStandaloneDisplay() || (!prompt && !showIosHint)) return null;
+
+  const dismiss = () => {
+    localStorage.setItem("bms_install_prompt_dismissed", "true");
+    setDismissed(true);
+  };
+
+  const install = async () => {
+    if (!prompt) return;
+    await prompt.prompt();
+    const choice = await prompt.userChoice;
+    if (choice.outcome === "accepted") dismiss();
+    setPrompt(null);
+  };
+
+  return <div className="relative">
+    {prompt ? <button type="button" onClick={install} className="btn-secondary !px-3 !py-2 text-sm" aria-label="Install BookMySeat">
+      <Download size={17} /> <span className="hidden lg:inline">Install</span>
+    </button> : <div className="flex items-center gap-2 rounded-xl border bg-white/80 px-3 py-2 text-xs font-semibold shadow-soft dark:bg-white/10">
+      <Download size={16} className="text-moss dark:text-leaf" />
+      <span>Add to Home Screen</span>
+      <button type="button" onClick={dismiss} aria-label="Dismiss install prompt" className="grid h-6 w-6 place-items-center rounded-lg hover:bg-black/5 dark:hover:bg-white/10"><X size={14} /></button>
+    </div>}
+  </div>;
+}
+
 function Header() {
   const { user, logout } = useAuth();
   const [open, setOpen] = useState(false);
@@ -56,6 +102,7 @@ function Header() {
         <button aria-label="Toggle theme" className="grid h-10 w-10 place-items-center rounded-xl hover:bg-black/5 dark:hover:bg-white/10" onClick={() => setDark(!dark)}>
           {dark ? <Sun size={18} /> : <Moon size={18} />}
         </button>
+        <InstallPrompt />
         <NotificationBell />
         {user ? <>
           <span className="max-w-36 truncate px-2 text-sm font-semibold">{user.name}</span>
@@ -71,6 +118,7 @@ function Header() {
       <Link onClick={() => setOpen(false)} to="/discover" className="py-2 font-semibold">Explore libraries</Link>
       <Link onClick={() => setOpen(false)} to="/about" className="py-2 font-semibold">About</Link>
       <Link onClick={() => setOpen(false)} to="/for-owners" className="py-2 font-semibold">For owners</Link>
+      <InstallPrompt />
       {user ? <><Link onClick={() => setOpen(false)} to={dashboard} className="py-2 font-semibold">Dashboard</Link><button onClick={logout} className="btn-secondary">Log out</button></> :
         <div className="grid grid-cols-2 gap-2"><Link to="/login" className="btn-secondary">Log in</Link><Link to="/register" className="btn-primary">Get started</Link></div>}
     </div>}
@@ -313,6 +361,8 @@ function CompactStudentDashboard() {
   const activeGroups = data.groupBookings.filter((item: any) => ["INVITING", "PENDING", "APPROVED"].includes(item.status));
   const pendingInviteCount = data.groupBookings.reduce((sum: number, item: any) => sum + item.members.filter((member: any) => !member.accepted).length, 0);
   const latestAnnouncements = data.announcements.slice(0, 5);
+  const latestComplaints = data.complaints.slice(0, 3);
+  const todayTasks = data.tasks || [];
   const firstName = user?.name?.split(" ")[0] || "Student";
 
   return <StudentDashboardLayout>
@@ -337,7 +387,7 @@ function CompactStudentDashboard() {
             [<BookOpen size={18} />, "Active Memberships", String(activeMemberships.length)],
             [<MapPin size={18} />, "Current Seat", currentMembership?.seat?.number || "Unassigned"],
             [<Clock3 size={18} />, "Pending Requests", String(pendingRequests.length)],
-            [<Bell size={18} />, "Unread Announcements", String(latestAnnouncements.length)]
+            [<Bell size={18} />, "Unread Notifications", String(unreadNotifications)]
           ].map(([icon, label, value]) => <div key={String(label)} className="card flex items-center gap-3 p-4">
             <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-moss/10 text-moss dark:bg-leaf/10 dark:text-leaf">{icon}</span>
             <div className="min-w-0"><p className="text-[11px] font-bold uppercase tracking-wide text-stone-500 dark:text-stone-400">{label}</p><p className="mt-1 truncate text-lg font-extrabold">{value}</p></div>
@@ -385,23 +435,25 @@ function CompactStudentDashboard() {
 
         <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,420px)]">
           <section className="card p-5">
-            <div className="flex items-center justify-between gap-3"><h2 className="font-display text-lg font-extrabold">Today's Study</h2><Flame className="text-moss dark:text-leaf" size={20} /></div>
-            <div className="mt-4 grid gap-3 sm:grid-cols-3">
-              <div><p className="text-xs text-stone-500">Current Streak</p><p className="mt-1 text-2xl font-extrabold">{data.streak?.currentDays || 0} days</p></div>
-              <div><p className="text-xs text-stone-500">Hours Today</p><p className="mt-1 text-2xl font-extrabold">{todayHours.toFixed(1)}</p></div>
-              <div><p className="text-xs text-stone-500">Weekly Goal</p><p className="mt-1 text-2xl font-extrabold">{weeklyGoalPercent}%</p></div>
+            <div className="flex items-center justify-between gap-3"><h2 className="font-display text-lg font-extrabold">Complaints</h2><Link to="/report-issue" className="text-sm font-bold text-moss dark:text-leaf">Report</Link></div>
+            <div className="mt-4 grid gap-3">
+              {latestComplaints.map((item: any) => <div key={item.id} className="rounded-xl border bg-stone-50/60 p-3 dark:bg-white/5">
+                <div className="flex items-start justify-between gap-3"><p className="text-sm font-bold">{item.title}</p><Status value={item.status} /></div>
+                <p className="mt-1 truncate text-xs text-stone-500">{item.library?.name} - {item.category}</p>
+              </div>)}
+              {!latestComplaints.length && <p className="rounded-xl border border-dashed p-4 text-center text-sm text-stone-500">No open reports.</p>}
             </div>
-            <div className="mt-4 h-2 overflow-hidden rounded-full bg-stone-200 dark:bg-white/10"><div className="h-full rounded-full bg-moss dark:bg-leaf" style={{ width: `${weeklyGoalPercent}%` }} /></div>
-            <p className="mt-2 text-xs text-stone-500">{Math.round(weeklyMinutes / 60)} of {weeklyGoalHours} focused hours this week</p>
           </section>
 
           <section className="card p-5">
-            <h2 className="font-display text-lg font-extrabold">Quick Actions</h2>
+            <h2 className="font-display text-lg font-extrabold">Tasks</h2>
+            <div className="mt-4 grid gap-2">
+              {todayTasks.slice(0, 4).map((task: any) => <div key={task.id} className="flex items-center gap-2 rounded-lg border p-3 text-sm"><span className={`h-2 w-2 rounded-full ${task.isCompleted ? "bg-leaf" : "bg-sun"}`} /><span className={task.isCompleted ? "text-stone-400 line-through" : "font-medium"}>{task.title}</span></div>)}
+              {!todayTasks.length && <p className="rounded-xl border border-dashed p-4 text-center text-sm text-stone-500">No tasks for today.</p>}
+            </div>
             <div className="mt-4 grid grid-cols-2 gap-2">
-              <Link to="/discover" className="btn-secondary !justify-start !px-3 !py-2 text-sm"><Search size={16} />Find Library</Link>
-              <Link to="/report-issue" className="btn-secondary !justify-start !px-3 !py-2 text-sm"><AlertCircle size={16} />Report Issue</Link>
-              <Link to="/group-study" className="btn-secondary !justify-start !px-3 !py-2 text-sm"><Users size={16} />Create Group</Link>
-              <Link to="/membership" className="btn-secondary !justify-start !px-3 !py-2 text-sm"><Star size={16} />Membership</Link>
+              <Link to="/tasks" className="btn-secondary !px-3 !py-2 text-sm"><Zap size={16} />Open Tasks</Link>
+              <Link to="/discover" className="btn-secondary !px-3 !py-2 text-sm"><Search size={16} />Find Library</Link>
             </div>
           </section>
         </div>
@@ -415,6 +467,17 @@ function CompactStudentDashboard() {
             <div className="rounded-xl border bg-stone-50/60 p-4 dark:bg-white/5"><p className="text-xs font-bold uppercase tracking-wide text-stone-500">Active Groups</p><p className="mt-1 text-2xl font-extrabold">{activeGroups.length}</p></div>
             <div className="rounded-xl border bg-stone-50/60 p-4 dark:bg-white/5"><p className="text-xs font-bold uppercase tracking-wide text-stone-500">Pending Invites</p><p className="mt-1 text-2xl font-extrabold">{pendingInviteCount}</p></div>
           </div>
+        </section>
+
+        <section className="card mt-4 p-5">
+          <div className="flex items-center justify-between gap-3"><h2 className="font-display text-lg font-extrabold">Study Progress</h2><Flame className="text-moss dark:text-leaf" size={20} /></div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            <div><p className="text-xs text-stone-500">Current Streak</p><p className="mt-1 text-2xl font-extrabold">{data.streak?.currentDays || 0} days</p></div>
+            <div><p className="text-xs text-stone-500">Hours Today</p><p className="mt-1 text-2xl font-extrabold">{todayHours.toFixed(1)}</p></div>
+            <div><p className="text-xs text-stone-500">Weekly Goal</p><p className="mt-1 text-2xl font-extrabold">{weeklyGoalPercent}%</p></div>
+          </div>
+          <div className="mt-4 h-2 overflow-hidden rounded-full bg-stone-200 dark:bg-white/10"><div className="h-full rounded-full bg-moss dark:bg-leaf" style={{ width: `${weeklyGoalPercent}%` }} /></div>
+          <p className="mt-2 text-xs text-stone-500">{Math.round(weeklyMinutes / 60)} of {weeklyGoalHours} focused hours this week</p>
         </section>
       </main>
     </div>
