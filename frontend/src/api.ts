@@ -11,11 +11,22 @@ const API_URL = normalizeApiUrl(configuredApiUrl);
 export type Role = "STUDENT" | "OWNER" | "ADMIN";
 export type User = { id: string; name: string; email: string; phone?: string; role: Role; isPro: boolean };
 export type Price = { name: string; amount: number };
+export type LibraryImage = { id: string; url: string; isCover: boolean; type?: "EXTERIOR" | "STUDY_HALL" | "SEAT" | "FACILITIES" | "OTHER"; alt?: string };
 export type Library = {
   id: string; name: string; slug: string; description: string; address: string; area: string; city: string; state: string;
   phone: string; whatsapp?: string; timings: string; capacity?: number; facilities: string[]; pricing: Price[];
-  latitude?: number; longitude?: number; images: { id: string; url: string; isCover: boolean }[]; rating?: number; reviewCount?: number;
+  latitude?: number; longitude?: number; images: LibraryImage[]; coverImage?: string | null; mapsUrl?: string; rating?: number | null; reviewCount?: number;
   announcements?: { id: string; title: string; message: string; createdAt: string }[]; _count?: Record<string, number>;
+  reviews?: { id: string; rating: number; comment?: string; createdAt: string; student?: { name: string } }[];
+};
+
+export type CommunityCategory = "CURRENT_AFFAIRS" | "VACANCIES" | "STUDY_MATERIAL" | "EXAM_UPDATES" | "GENERAL_DISCUSSION";
+export type CommunityPost = {
+  id: string; category: CommunityCategory; title: string; body: string; createdAt: string;
+  author: { id: string; name: string; role: Role };
+  comments: { id: string; body: string; createdAt: string; author: { id: string; name: string; role: Role } }[];
+  reactions: { id: string; userId: string; type: string }[];
+  _count?: { comments: number; reactions: number; reports: number };
 };
 
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {

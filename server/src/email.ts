@@ -56,11 +56,12 @@ export async function sendEmail(message: EmailMessage): Promise<EmailDeliveryRes
 }
 
 export function sendWelcomeEmail(to: string, name: string) {
+  const dashboardLink = `${env.CLIENT_URL.split(",")[0]?.replace(/\/+$/, "") || "https://bookmyseat.in"}/dashboard`;
   return sendEmail({
     to,
     subject: "Welcome to BookMySeat",
-    text: `Welcome to BookMySeat, ${name}. You can now discover libraries, manage memberships, and track your study journey.`,
-    html: page("Welcome to BookMySeat", `<p>Hi ${name},</p><p>Your account is ready. You can now discover libraries, manage memberships, and track your study journey.</p>`)
+    text: `Welcome to BookMySeat, ${name}. Your account is ready. Open your dashboard: ${dashboardLink}. For support, contact ${env.SUPPORT_EMAIL}.`,
+    html: page("Welcome to BookMySeat", `<p>Hi ${name},</p><p>Your account is ready. You can now discover libraries, manage memberships, join the student community, and track your study journey.</p><p><a href="${dashboardLink}" style="display:inline-block;background:#2f6b4f;color:#fff;padding:12px 16px;border-radius:10px;text-decoration:none;font-weight:700">Open dashboard</a></p><p>Need help? Contact <a href="mailto:${env.SUPPORT_EMAIL}" style="color:#2f6b4f;font-weight:700">${env.SUPPORT_EMAIL}</a>.</p>`)
   });
 }
 

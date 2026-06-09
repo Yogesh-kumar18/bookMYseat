@@ -5,9 +5,9 @@ import {
   ArrowRight, BarChart3, Bell, BookOpen, Building2, Check, ChevronRight, Clock3, Flame, Heart,
   Download, IndianRupee, LayoutDashboard, LogOut, MapPin, Menu, Moon, Phone, Search, ShieldCheck, Sparkles,
   Star, Sun, TimerReset, Upload, Users, X, Plus, Trash2, MessageSquare, UserPlus, CheckCircle2,
-  AlertCircle, BookMarked, Settings, Home as HomeIcon, Zap
+  AlertCircle, BookMarked, Settings, Home as HomeIcon, Zap, Image as ImageIcon, Navigation, Flag, ThumbsUp, Send, Ban
 } from "lucide-react";
-import { api, type Library, type Role } from "./api";
+import { api, type CommunityPost, type Library, type Role } from "./api";
 import { AuthProvider, useAuth } from "./auth";
 import { isIosSafari, isStandaloneDisplay, type BeforeInstallPromptEvent } from "./pwa";
 
@@ -190,7 +190,7 @@ function LibraryCard({ library, index = 0 }: { library: Library; index?: number 
     <div className="h-52 overflow-hidden"><LibraryVisual library={library} /></div>
     <div className="p-5">
       <div className="flex items-start justify-between gap-3"><div><h3 className="font-display text-xl font-extrabold">{library.name}</h3><p className="mt-1 flex items-center gap-1 text-sm text-stone-500"><MapPin size={15} /> {library.area}, {library.city}</p></div>
-        {library.rating ? <span className="flex items-center gap-1 rounded-lg bg-moss px-2 py-1 text-xs font-bold text-white"><Star size={12} fill="currentColor" /> {library.rating.toFixed(1)}</span> : null}
+        {library.rating ? <span className="flex shrink-0 items-center gap-1 rounded-lg bg-moss px-2 py-1 text-xs font-bold text-white"><Star size={12} fill="currentColor" /> {library.rating.toFixed(1)} <span className="hidden sm:inline">({library.reviewCount ?? 0} Reviews)</span></span> : null}
       </div>
       <div className="mt-4 flex flex-wrap gap-2">{library.facilities.slice(0, 3).map((item) => <span key={item} className="rounded-lg border border-stone-200 bg-stone-100 px-2.5 py-1 text-xs font-semibold text-stone-700 dark:border-white/15 dark:bg-white/10 dark:text-stone-100">{item}</span>)}</div>
       <div className="mt-5 flex items-end justify-between border-t pt-4"><div><span className="text-xs text-stone-500">Starting at</span><p className="font-display text-xl font-extrabold">{money.format(lowest)}<span className="text-xs font-normal text-stone-500">/month</span></p></div><span className="text-sm font-bold text-moss dark:text-leaf">View details</span></div>
@@ -226,6 +226,11 @@ function LibraryDetails() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { data: library, isLoading } = useQuery({ queryKey: ["library", slug], queryFn: () => api<Library>(`/libraries/${slug}`) });
+  const { data: eligibility } = useQuery({
+    queryKey: ["review-eligibility", library?.id],
+    queryFn: () => api<{ eligible: boolean; review?: { rating: number; comment?: string } }>(`/libraries/${library!.id}/review-eligibility`),
+    enabled: Boolean(user?.role === "STUDENT" && library?.id)
+  });
   const booking = useMutation({
     mutationFn: (planName: string) => api(`/libraries/${library!.id}/bookings`, { method: "POST", body: JSON.stringify({ planName }) }),
     onSuccess: () => alert("Booking request sent. You can track it in your dashboard."),
@@ -234,26 +239,51 @@ function LibraryDetails() {
   const favorite = useMutation({ mutationFn: () => api(`/libraries/${library!.id}/favorite`, { method: "POST" }), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["student"] }) });
   if (isLoading) return <Layout><div className="container-app py-24 text-center">Loading library...</div></Layout>;
   if (!library) return <Layout><Empty icon={<Building2 />} title="Library not found" text="This listing is unavailable." /></Layout>;
+  const gallery = library.images || [];
   return <Layout><section className="container-app py-8">
     <Link to="/discover" className="text-sm font-semibold text-moss">← Back to libraries</Link>
     <div className="mt-5 grid gap-5 lg:grid-cols-[1.5fr_1fr]">
-      <div className="h-80 overflow-hidden rounded-3xl sm:h-[430px]"><LibraryVisual library={library} /></div>
+      <div className="grid gap-3">
+        <div className="h-80 overflow-hidden rounded-3xl sm:h-[430px]"><LibraryVisual library={library} /></div>
+        {gallery.length > 1 && <div className="grid grid-cols-4 gap-2">{gallery.slice(0, 4).map((image) => <div key={image.id} className="aspect-[4/3] overflow-hidden rounded-xl border bg-white"><img src={image.url} alt={image.alt || library.name} className="h-full w-full object-cover" /></div>)}</div>}
+      </div>
       <div className="card p-6 sm:p-8">
         <p className="eyebrow">{library.city}, {library.state}</p><h1 className="mt-2 font-display text-4xl font-extrabold">{library.name}</h1>
-        <p className="mt-3 flex items-center gap-1.5 text-stone-500"><MapPin size={17} /> {library.address}</p>
+        {library.rating ? <p className="mt-3 flex items-center gap-1 text-sm font-bold text-moss"><Star size={16} fill="currentColor" /> {library.rating.toFixed(1)} ({library.reviewCount ?? 0} Reviews)</p> : null}
+        <p className="mt-3 flex items-start gap-1.5 text-stone-500"><MapPin size={17} className="mt-0.5 shrink-0" /> <span>{library.address}, {library.area}, {library.city}, {library.state}</span></p>
         <div className="mt-6 grid gap-3">{library.pricing.map((plan) => <button key={plan.name} onClick={() => user ? booking.mutate(plan.name) : navigate("/login")} className="flex items-center justify-between rounded-2xl border p-4 text-left transition hover:border-moss hover:bg-moss/5"><span><b>{plan.name}</b><span className="mt-1 block text-xs text-stone-500">Monthly plan</span></span><span className="font-display text-xl font-extrabold">{money.format(plan.amount)}</span></button>)}</div>
-        <div className="mt-4 grid grid-cols-2 gap-2"><a href={`tel:${library.phone}`} className="btn-primary"><Phone size={17} /> Call owner</a><button onClick={() => user ? favorite.mutate() : navigate("/login")} className="btn-secondary"><Heart size={17} /> Save</button></div>
+        <div className="mt-4 grid grid-cols-2 gap-2"><a href={`tel:${library.phone}`} className="btn-primary"><Phone size={17} /> Call owner</a><a href={library.mapsUrl} target="_blank" rel="noreferrer" className="btn-secondary"><Navigation size={17} /> Maps</a><button onClick={() => user ? favorite.mutate() : navigate("/login")} className="btn-secondary col-span-2"><Heart size={17} /> Save</button></div>
       </div>
     </div>
     <div className="mt-10 grid gap-10 lg:grid-cols-[1.5fr_1fr]">
       <div><h2 className="font-display text-2xl font-extrabold">About this library</h2><p className="mt-4 leading-7 text-stone-600 dark:text-stone-300">{library.description}</p>
         <h2 className="mt-10 font-display text-2xl font-extrabold">Facilities</h2><div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">{library.facilities.map((item) => <div key={item} className="flex items-center gap-2 rounded-xl border bg-white p-3 text-sm font-semibold text-stone-800 dark:border-white/15 dark:bg-white/10 dark:text-stone-100"><Check size={16} className="text-moss dark:text-emerald-300" /> {item}</div>)}</div>
+        <h2 className="mt-10 font-display text-2xl font-extrabold">Reviews</h2>
+        {user?.role === "STUDENT" && eligibility?.eligible ? <ReviewForm libraryId={library.id} existing={eligibility.review} onDone={() => queryClient.invalidateQueries({ queryKey: ["library", slug] })} /> : <p className="mt-3 rounded-2xl border bg-white p-4 text-sm text-stone-500 dark:bg-white/5">Verified students with an approved membership or library usage can leave reviews.</p>}
+        <div className="mt-5 grid gap-3">{library.reviews?.length ? library.reviews.map((review) => <article key={review.id} className="rounded-2xl border bg-white p-4 dark:bg-white/5"><div className="flex items-center justify-between"><p className="font-bold">{review.student?.name || "Student"}</p><span className="flex items-center gap-1 text-sm font-bold text-moss"><Star size={14} fill="currentColor" /> {review.rating}</span></div>{review.comment && <p className="mt-2 text-sm leading-6 text-stone-600 dark:text-stone-300">{review.comment}</p>}</article>) : <p className="text-sm text-stone-500">No reviews yet.</p>}</div>
       </div>
       <aside><div className="rounded-2xl border p-5"><p className="text-sm text-stone-500">Opening hours</p><p className="mt-1 flex items-center gap-2 font-bold"><Clock3 size={18} className="text-moss" /> {library.timings}</p></div>
+        <div className="mt-4 rounded-2xl border p-5"><p className="font-bold">Location</p><p className="mt-2 text-sm leading-6 text-stone-500">{library.address}, {library.area}, {library.city}, {library.state}</p><a href={library.mapsUrl} target="_blank" rel="noreferrer" className="btn-secondary mt-4 w-full"><Navigation size={17} /> Open in Maps</a></div>
         {library.announcements?.length ? <div className="mt-4 rounded-2xl border p-5"><p className="font-bold">Announcements</p><div className="mt-3 grid gap-3">{library.announcements.slice(0, 3).map((item) => <div key={item.id} className="border-t pt-3 first:border-0 first:pt-0"><p className="text-sm font-semibold">{item.title}</p><p className="mt-1 text-sm text-stone-500">{item.message}</p></div>)}</div></div> : null}
       </aside>
     </div>
   </section></Layout>;
+}
+
+function ReviewForm({ libraryId, existing, onDone }: { libraryId: string; existing?: { rating: number; comment?: string }; onDone: () => void }) {
+  const [rating, setRating] = useState(existing?.rating || 5);
+  const [comment, setComment] = useState(existing?.comment || "");
+  const [message, setMessage] = useState("");
+  const mutation = useMutation({
+    mutationFn: () => api(`/libraries/${libraryId}/reviews`, { method: "POST", body: JSON.stringify({ rating, comment }) }),
+    onSuccess: () => { setMessage("Review saved."); onDone(); },
+    onError: (error) => setMessage(error.message)
+  });
+  return <form onSubmit={(event) => { event.preventDefault(); mutation.mutate(); }} className="mt-4 rounded-2xl border bg-white p-4 dark:bg-white/5">
+    <div className="flex gap-1">{[1, 2, 3, 4, 5].map((value) => <button key={value} type="button" aria-label={`${value} star rating`} onClick={() => setRating(value)} className="grid h-10 w-10 place-items-center rounded-xl hover:bg-moss/10"><Star size={20} fill={value <= rating ? "currentColor" : "none"} className={value <= rating ? "text-moss" : "text-stone-300"} /></button>)}</div>
+    <textarea className="input mt-3 min-h-24" value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Share a helpful review for other students" />
+    <div className="mt-3 flex items-center justify-between gap-3"><button disabled={mutation.isPending} className="btn-primary">{mutation.isPending ? "Saving..." : "Save review"}</button>{message && <span className="text-sm font-semibold text-moss">{message}</span>}</div>
+  </form>;
 }
 
 function AuthPage({ mode }: { mode: "login" | "register" }) {
@@ -270,8 +300,15 @@ function AuthPage({ mode }: { mode: "login" | "register" }) {
       navigate(user.role === "OWNER" ? "/owner" : user.role === "ADMIN" ? "/admin" : "/dashboard");
     } catch (err) { setError(err instanceof Error ? err.message : "Unable to continue"); } finally { setBusy(false); }
   };
-  return <Layout><section className="container-app grid min-h-[70vh] place-items-center py-14">
-    <div className="card w-full max-w-md p-7 sm:p-9"><div className="text-center"><span className="eyebrow">{mode === "login" ? "Welcome back" : "Create your account"}</span><h1 className="mt-2 font-display text-3xl font-extrabold">{mode === "login" ? "Log in to BookMySeat" : "Start studying smarter"}</h1></div>
+  return <Layout><section className="container-app grid min-h-[76vh] items-center gap-8 py-10 lg:grid-cols-[1.1fr_.9fr]">
+    <div className="hidden lg:block">
+      <span className="eyebrow">{mode === "login" ? "Welcome back" : "Start with confidence"}</span>
+      <h1 className="mt-4 max-w-2xl font-display text-5xl font-extrabold leading-tight">A calmer way to manage study seats, memberships, and daily library life.</h1>
+      <div className="mt-8 grid max-w-xl gap-3">
+        {[["Verified libraries", "Real listings with photos, facilities, and pricing."], ["Student tools", "Membership status, complaints, tasks, and community in one place."], ["Owner ready", "Bookings, fees, attendance, and announcements built in."]].map(([title, text]) => <div key={title} className="flex gap-3 rounded-2xl border bg-white/70 p-4 shadow-soft dark:bg-white/5"><ShieldCheck className="mt-0.5 text-moss" size={20} /><div><p className="font-bold">{title}</p><p className="text-sm text-stone-500">{text}</p></div></div>)}
+      </div>
+    </div>
+    <div className="card w-full p-6 sm:p-9"><div><span className="eyebrow">{mode === "login" ? "Secure access" : "Create your account"}</span><h1 className="mt-2 font-display text-3xl font-extrabold">{mode === "login" ? "Log in to BookMySeat" : "Start studying smarter"}</h1><p className="mt-2 text-sm text-stone-500">Use your registered email to continue.</p></div>
       <form onSubmit={submit} className="mt-8 grid gap-4">
         {mode === "register" && <><Field label="Full name" name="name" required /><Field label="Phone" name="phone" type="tel" /><label><span className="label">I am a</span><select name="role" className="input" defaultValue={params.get("role") || "STUDENT"}><option value="STUDENT">Student</option><option value="OWNER">Library owner</option></select></label></>}
         <Field label="Email address" name="email" type="email" required /><Field label="Password" name="password" type="password" minLength={8} required />
@@ -309,6 +346,7 @@ function StudentDashboardLayout({ children }: { children: ReactNode }) {
   const navItems = [
     { path: "/dashboard", label: "Dashboard", icon: <HomeIcon size={18} /> },
     { path: "/libraries", label: "My Libraries", icon: <BookOpen size={18} /> },
+    { path: "/community", label: "Community", icon: <MessageSquare size={18} /> },
     { path: "/notifications", label: "Notifications", icon: <Bell size={18} /> },
     { path: "/announcements", label: "Announcements", icon: <BookMarked size={18} /> },
     { path: "/group-study", label: "Group Study", icon: <Users size={18} /> },
@@ -316,6 +354,13 @@ function StudentDashboardLayout({ children }: { children: ReactNode }) {
     { path: "/tasks", label: "Tasks", icon: <Zap size={18} /> },
     { path: "/membership", label: "Membership", icon: <Star size={18} /> },
     { path: "/settings", label: "Settings", icon: <Settings size={18} /> },
+  ];
+  const bottomItems = [
+    { path: "/dashboard", label: "Home", icon: <HomeIcon size={20} /> },
+    { path: "/libraries", label: "Libraries", icon: <BookOpen size={20} /> },
+    { path: "/community", label: "Community", icon: <MessageSquare size={20} /> },
+    { path: "/report-issue", label: "Complaint", icon: <AlertCircle size={20} /> },
+    { path: "/settings", label: "Settings", icon: <Settings size={20} /> },
   ];
 
   return <div className="min-h-screen bg-[#f2f2ec] dark:bg-[#0d130f] flex flex-col md:flex-row">
@@ -327,7 +372,10 @@ function StudentDashboardLayout({ children }: { children: ReactNode }) {
       ))}</nav>
       <div className="border-t pt-4"><div className="flex items-center justify-between gap-2 rounded-lg px-3 py-2"><span className="text-sm font-semibold truncate">{user?.name}</span><button onClick={logout} aria-label="Logout" className="grid h-8 w-8 place-items-center rounded hover:bg-stone-100 dark:hover:bg-white/5"><LogOut size={16} /></button></div></div>
     </aside>
-    <main className="flex-1 md:pb-0">{children}</main>
+    <main className="flex-1 pb-24 md:pb-0">{children}</main>
+    <nav className="fixed inset-x-0 bottom-0 z-50 grid grid-cols-5 border-t bg-white/95 px-1 py-2 shadow-soft backdrop-blur md:hidden dark:bg-[#101713]/95">
+      {bottomItems.map(({ path, label, icon }) => <Link key={path} to={path} className={`grid min-h-14 place-items-center rounded-xl text-[11px] font-bold ${location.pathname === path ? "bg-moss/10 text-moss" : "text-stone-500"}`}>{icon}<span>{label}</span></Link>)}
+    </nav>
   </div>;
 }
 
@@ -364,6 +412,8 @@ function CompactStudentDashboard() {
   const latestComplaints = data.complaints.slice(0, 3);
   const todayTasks = data.tasks || [];
   const firstName = user?.name?.split(" ")[0] || "Student";
+  const expiryDate = currentMembership?.endDate ? new Date(currentMembership.endDate) : null;
+  const daysRemaining = expiryDate ? Math.max(0, Math.ceil((expiryDate.getTime() - Date.now()) / 86_400_000)) : null;
 
   return <StudentDashboardLayout>
     <div className="min-h-screen bg-[#f2f2ec] dark:bg-[#0d130f]">
@@ -386,7 +436,7 @@ function CompactStudentDashboard() {
           {[
             [<BookOpen size={18} />, "Active Memberships", String(activeMemberships.length)],
             [<MapPin size={18} />, "Current Seat", currentMembership?.seat?.number || "Unassigned"],
-            [<Clock3 size={18} />, "Pending Requests", String(pendingRequests.length)],
+            [<Clock3 size={18} />, "Days Remaining", daysRemaining == null ? "Not set" : String(daysRemaining)],
             [<Bell size={18} />, "Unread Notifications", String(unreadNotifications)]
           ].map(([icon, label, value]) => <div key={String(label)} className="card flex items-center gap-3 p-4">
             <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-moss/10 text-moss dark:bg-leaf/10 dark:text-leaf">{icon}</span>
@@ -403,6 +453,7 @@ function CompactStudentDashboard() {
             {currentMembership ? <>
               <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <div className="rounded-xl border bg-stone-50/60 p-3 dark:bg-white/5"><p className="text-xs text-stone-500">Seat Number</p><p className="mt-1 font-bold">{currentMembership.seat?.number || "Unassigned"}</p></div>
+                <div className="rounded-xl border bg-stone-50/60 p-3 dark:bg-white/5"><p className="text-xs text-stone-500">Days Remaining</p><p className="mt-1 font-bold">{daysRemaining == null ? "Not set" : `${daysRemaining} days`}</p></div>
                 <div className="rounded-xl border bg-stone-50/60 p-3 dark:bg-white/5"><p className="text-xs text-stone-500">Monthly Fee</p><p className="mt-1 font-bold">{money.format(currentMembership.monthlyFee)}</p></div>
                 <div className="rounded-xl border bg-stone-50/60 p-3 dark:bg-white/5"><p className="text-xs text-stone-500">Status</p><p className="mt-1 font-bold">{currentMembership.status.replace("_", " ")}</p></div>
                 <div className="rounded-xl border bg-stone-50/60 p-3 dark:bg-white/5"><p className="text-xs text-stone-500">Expiry Date</p><p className="mt-1 font-bold">{currentMembership.endDate ? new Date(currentMembership.endDate).toLocaleDateString() : "Not set"}</p></div>
@@ -959,6 +1010,70 @@ function GroupStudyPage() {
   </StudentDashboardLayout>;
 }
 
+const communityLabels: Record<string, string> = {
+  CURRENT_AFFAIRS: "Current Affairs",
+  VACANCIES: "Vacancies",
+  STUDY_MATERIAL: "Study Material",
+  EXAM_UPDATES: "Exam Updates",
+  GENERAL_DISCUSSION: "General Discussion"
+};
+
+function CommunityPage() {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("");
+  const [reporting, setReporting] = useState<string | null>(null);
+  const { data, isLoading } = useQuery({ queryKey: ["community", search, category], queryFn: () => api<{ posts: CommunityPost[]; categories: string[] }>(`/community/posts?search=${encodeURIComponent(search)}&category=${encodeURIComponent(category)}`) });
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["community"] });
+  const createPost = useMutation({
+    mutationFn: (values: Record<string, string>) => api("/community/posts", { method: "POST", body: JSON.stringify(values) }),
+    onSuccess: (_, __) => refresh()
+  });
+  const react = useMutation({ mutationFn: (postId: string) => api(`/community/posts/${postId}/reactions`, { method: "POST" }), onSuccess: refresh });
+  const comment = useMutation({ mutationFn: ({ postId, body }: { postId: string; body: string }) => api(`/community/posts/${postId}/comments`, { method: "POST", body: JSON.stringify({ body }) }), onSuccess: refresh });
+  const report = useMutation({ mutationFn: ({ postId, reason }: { postId: string; reason: string }) => api("/community/reports", { method: "POST", body: JSON.stringify({ postId, reason }) }), onSuccess: () => { setReporting(null); refresh(); } });
+  const block = useMutation({ mutationFn: (userId: string) => api(`/community/block/${userId}`, { method: "POST" }), onSuccess: refresh });
+  const removePost = useMutation({ mutationFn: (postId: string) => api(`/community/posts/${postId}`, { method: "DELETE" }), onSuccess: refresh });
+  const categories = data?.categories || Object.keys(communityLabels);
+
+  return <StudentDashboardLayout>
+    <main className="container-app py-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div><span className="eyebrow">Student Community</span><h1 className="mt-1 font-display text-3xl font-extrabold">Community Portal</h1><p className="mt-2 text-sm text-stone-500">Vacancies, exam updates, notes, current affairs, and useful study tips.</p></div>
+        <Link to="/report-issue" className="btn-secondary !px-4 !py-2 text-sm"><ShieldCheck size={16} /> Guidelines</Link>
+      </div>
+
+      <form onSubmit={(event) => { event.preventDefault(); const form = event.currentTarget; createPost.mutate(Object.fromEntries(new FormData(form).entries()) as Record<string, string>); form.reset(); }} className="card mt-5 grid gap-3 p-4">
+        <div className="grid gap-3 sm:grid-cols-[220px_1fr]"><select name="category" className="input" defaultValue="GENERAL_DISCUSSION">{categories.map((item) => <option key={item} value={item}>{communityLabels[item] || item}</option>)}</select><Field label="Post title" name="title" required /></div>
+        <label><span className="label">Post</span><textarea name="body" className="input min-h-24" required placeholder="Share something useful with students" /></label>
+        <div className="flex items-center justify-between"><p className="text-xs text-stone-500">Be respectful. Reports are reviewed by owners and admins.</p><button className="btn-primary !px-4 !py-2 text-sm" disabled={createPost.isPending}><Send size={16} /> Post</button></div>
+      </form>
+
+      <div className="mt-5 grid gap-3 rounded-2xl border bg-white p-3 shadow-soft sm:grid-cols-[1fr_240px] dark:bg-white/5">
+        <label className="flex items-center gap-3 px-2"><Search size={20} className="text-moss" /><input className="w-full bg-transparent py-3 outline-none" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search community" /></label>
+        <select className="input" value={category} onChange={(event) => setCategory(event.target.value)}><option value="">All categories</option>{categories.map((item) => <option key={item} value={item}>{communityLabels[item] || item}</option>)}</select>
+      </div>
+
+      <div className="mt-5 grid gap-4">
+        {isLoading && <p className="card p-6 text-center text-sm text-stone-500">Loading posts...</p>}
+        {data?.posts.map((post) => <article key={post.id} className="card p-4 sm:p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div><span className="rounded-lg bg-moss/10 px-2 py-1 text-xs font-bold text-moss">{communityLabels[post.category]}</span><h2 className="mt-3 font-display text-xl font-extrabold">{post.title}</h2><p className="mt-1 text-xs text-stone-500">{post.author.name} · {new Date(post.createdAt).toLocaleString()}</p></div>
+            <div className="flex gap-1"><button onClick={() => setReporting(post.id)} className="grid h-9 w-9 place-items-center rounded-xl border" aria-label="Report post"><Flag size={16} /></button>{post.author.id !== user?.id && <button onClick={() => block.mutate(post.author.id)} className="grid h-9 w-9 place-items-center rounded-xl border" aria-label="Block user"><Ban size={16} /></button>}{["OWNER", "ADMIN"].includes(user?.role || "") && <button onClick={() => removePost.mutate(post.id)} className="grid h-9 w-9 place-items-center rounded-xl border text-red-600" aria-label="Delete post"><Trash2 size={16} /></button>}</div>
+          </div>
+          <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-stone-600 dark:text-stone-300">{post.body}</p>
+          <div className="mt-4 flex flex-wrap items-center gap-2"><button onClick={() => react.mutate(post.id)} className="btn-secondary !px-3 !py-2 text-sm"><ThumbsUp size={16} /> {post._count?.reactions ?? post.reactions.length}</button><span className="text-sm text-stone-500">{post._count?.comments ?? post.comments.length} comments</span></div>
+          {reporting === post.id && <form onSubmit={(event) => { event.preventDefault(); const reason = String(new FormData(event.currentTarget).get("reason") || ""); report.mutate({ postId: post.id, reason }); }} className="mt-3 flex gap-2"><input name="reason" className="input" placeholder="Reason for report" required /><button className="btn-primary !px-4 !py-2">Report</button></form>}
+          <div className="mt-4 grid gap-2">{post.comments.map((entry) => <div key={entry.id} className="rounded-xl bg-stone-50 p-3 text-sm dark:bg-white/5"><p className="font-bold">{entry.author.name}</p><p className="mt-1 text-stone-600 dark:text-stone-300">{entry.body}</p></div>)}</div>
+          <form onSubmit={(event) => { event.preventDefault(); const form = event.currentTarget; const body = String(new FormData(form).get("body") || ""); comment.mutate({ postId: post.id, body }); form.reset(); }} className="mt-3 flex gap-2"><input name="body" className="input" placeholder="Add a comment" required /><button className="btn-secondary !px-4 !py-2"><Send size={16} /></button></form>
+        </article>)}
+        {!isLoading && !data?.posts.length && <Empty icon={<MessageSquare />} title="No community posts" text="Start a useful discussion for other students." />}
+      </div>
+    </main>
+  </StudentDashboardLayout>;
+}
+
 function ReportIssuePage() {
   const queryClient = useQueryClient();
   const { data, isLoading } = useQuery({ queryKey: ["student"], queryFn: () => api<any>("/student/dashboard") });
@@ -981,7 +1096,7 @@ function ReportIssuePage() {
           {memberships.length ? <form onSubmit={submit} className="card p-6 grid gap-4">
             <select name="libraryId" className="input" required><option value="">Select your library</option>{memberships.map((item: any) => <option key={item.id} value={item.libraryId}>{item.library.name}</option>)}</select>
             <Field label="Title" name="title" placeholder="Short issue title" required />
-            <select name="category" className="input" required><option value="">Select issue type</option><option>AC Issue</option><option>WiFi Issue</option><option>Cleanliness</option><option>Seat Issue</option><option>Noise Complaint</option><option>Other</option></select>
+            <select name="category" className="input" required><option value="">Select issue type</option><option>AC Issue</option><option>WiFi Issue</option><option>Seat Issue</option><option>Cleanliness</option><option>Noise</option><option>Other</option></select>
             <textarea name="description" className="input min-h-28" placeholder="Describe the issue in detail..." required />
             <button className="btn-primary !py-2.5">Submit report</button>
           </form> : <div className="card p-6 text-center"><AlertCircle className="mx-auto text-stone-400" size={32} /><p className="mt-4 text-sm text-stone-500">You need an active membership to report issues.</p><Link to="/discover" className="mt-4 inline-block text-sm font-bold text-moss">Find a library</Link></div>}
@@ -1034,11 +1149,14 @@ function MembershipPage() {
 
 function SettingsPage() {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<"account" | "profile" | "password" | "notifications" | "library">("account");
+  const [activeTab, setActiveTab] = useState<"membership" | "profile" | "security" | "notifications" | "library" | "support" | "about">("profile");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [formData, setFormData] = useState({ name: "", phone: "", currentPassword: "", newPassword: "", confirmPassword: "" });
-  const [libraryForm, setLibraryForm] = useState({ name: "", address: "", phone: "", timings: "", capacity: "", facilities: "", pricing: "", photos: "" });
+  const [libraryForm, setLibraryForm] = useState({ name: "", address: "", phone: "", timings: "", capacity: "", facilities: "", pricing: "" });
+  const [imageType, setImageType] = useState("EXTERIOR");
+  const [uploadFiles, setUploadFiles] = useState<File[]>([]);
+  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
   const [settings, setSettings] = useState<any>(null);
   const queryClient = useQueryClient();
 
@@ -1060,12 +1178,13 @@ function SettingsPage() {
           timings: data.library.timings || "",
           capacity: data.library.capacity ? String(data.library.capacity) : "",
           facilities: Array.isArray(data.library.facilities) ? data.library.facilities.join(", ") : "",
-          pricing: Array.isArray(data.library.pricing) ? data.library.pricing.map((plan: any) => `${plan.name}: ${plan.amount}`).join("\n") : "",
-          photos: Array.isArray(data.library.images) ? data.library.images.map((image: any) => image.url).join("\n") : ""
+          pricing: Array.isArray(data.library.pricing) ? data.library.pricing.map((plan: any) => `${plan.name}: ${plan.amount}`).join("\n") : ""
         });
       }
     }
   }, [data]);
+
+  useEffect(() => () => imagePreviews.forEach((url) => URL.revokeObjectURL(url)), [imagePreviews]);
 
   const updateProfile = async (e: FormEvent) => {
     e.preventDefault();
@@ -1149,7 +1268,6 @@ function SettingsPage() {
             const [name, amount] = line.split(":");
             return { name: name?.trim(), amount: Number(amount) };
           }).filter((item) => item.name && Number.isFinite(item.amount)),
-          images: libraryForm.photos.split("\n").map((item) => item.trim()).filter(Boolean)
         })
       });
       setMessage("Library settings saved successfully.");
@@ -1157,6 +1275,27 @@ function SettingsPage() {
       queryClient.invalidateQueries({ queryKey: ["owner"] });
     } catch (err) {
       setMessage((err as Error).message || "Failed to save library settings.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const uploadLibraryImages = async () => {
+    if (!settings.library?.id || !uploadFiles.length) return;
+    setLoading(true);
+    setMessage("");
+    const body = new FormData();
+    uploadFiles.forEach((file) => body.append("images", file));
+    body.append("type", imageType);
+    try {
+      await api(`/libraries/${settings.library.id}/images`, { method: "POST", body });
+      setMessage("Library photos uploaded successfully.");
+      setUploadFiles([]);
+      setImagePreviews([]);
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+      queryClient.invalidateQueries({ queryKey: ["owner"] });
+    } catch (err) {
+      setMessage((err as Error).message || "Failed to upload photos.");
     } finally {
       setLoading(false);
     }
@@ -1177,11 +1316,13 @@ function SettingsPage() {
             <nav className="lg:w-48">
               <div className="grid gap-1">
                 {[
-                  { id: "account" as const, label: "Account", icon: <ShieldCheck size={18} /> },
                   { id: "profile" as const, label: "Profile", icon: <Users size={18} /> },
+                  { id: "notifications" as const, label: "Notifications", icon: <Bell size={18} /> },
+                  { id: "security" as const, label: "Security", icon: <ShieldCheck size={18} /> },
+                  { id: "membership" as const, label: "Membership", icon: <Star size={18} /> },
                   ...(user.role === "OWNER" ? [{ id: "library" as const, label: "Library", icon: <Building2 size={18} /> }] : []),
-                  { id: "password" as const, label: "Password", icon: <TimerReset size={18} /> },
-                  { id: "notifications" as const, label: "Notifications", icon: <Bell size={18} /> }
+                  { id: "support" as const, label: "Support", icon: <MessageSquare size={18} /> },
+                  { id: "about" as const, label: "About", icon: <BookOpen size={18} /> }
                 ].map(tab => (
                   <button
                     key={tab.id}
@@ -1195,9 +1336,9 @@ function SettingsPage() {
             </nav>
 
             <div className="flex-1">
-              {activeTab === "account" && (
+              {activeTab === "membership" && (
                 <div className="card p-6">
-                  <h2 className="font-display text-xl font-extrabold mb-4">Account Information</h2>
+                  <h2 className="font-display text-xl font-extrabold mb-4">Membership</h2>
                   <div className="grid gap-4">
                     <div><span className="text-sm text-stone-500">Email</span><p className="font-semibold">{settings.email}</p></div>
                     <div><span className="text-sm text-stone-500">Account Type</span><p className="font-semibold capitalize">{user.role === "STUDENT" ? "Student" : "Library Owner"}</p></div>
@@ -1224,9 +1365,9 @@ function SettingsPage() {
                 </div>
               )}
 
-              {activeTab === "password" && (
+              {activeTab === "security" && (
                 <div className="card p-6">
-                  <h2 className="font-display text-xl font-extrabold mb-4">Change Password</h2>
+                  <h2 className="font-display text-xl font-extrabold mb-4">Security</h2>
                   <form onSubmit={changePassword} className="grid gap-4">
                     <Field label="Current Password" type="password" value={formData.currentPassword} onChange={(e) => setFormData({ ...formData, currentPassword: e.target.value })} required />
                     <Field label="New Password" type="password" minLength={8} value={formData.newPassword} onChange={(e) => setFormData({ ...formData, newPassword: e.target.value })} required />
@@ -1234,6 +1375,24 @@ function SettingsPage() {
                     {message && <p className={`rounded-lg p-3 text-sm ${message.includes("success") ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>{message}</p>}
                     <button disabled={loading} className="btn-primary">{loading ? "Changing..." : "Change Password"}</button>
                   </form>
+                </div>
+              )}
+
+              {activeTab === "support" && (
+                <div className="card p-6">
+                  <h2 className="font-display text-xl font-extrabold mb-4">Support</h2>
+                  <div className="grid gap-3">
+                    <Link to="/report-issue" className="flex items-center justify-between rounded-xl border p-4 font-semibold hover:bg-stone-50 dark:hover:bg-white/5"><span>Submit a complaint</span><ChevronRight size={18} /></Link>
+                    <Link to="/community" className="flex items-center justify-between rounded-xl border p-4 font-semibold hover:bg-stone-50 dark:hover:bg-white/5"><span>Ask the community</span><ChevronRight size={18} /></Link>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === "about" && (
+                <div className="card p-6">
+                  <h2 className="font-display text-xl font-extrabold mb-4">About BookMySeat</h2>
+                  <p className="text-sm leading-6 text-stone-500">BookMySeat helps students find libraries, manage memberships, raise complaints, and learn together through the community portal.</p>
+                  <p className="mt-4 text-sm font-semibold">Account type: {user.role}</p>
                 </div>
               )}
 
@@ -1248,7 +1407,20 @@ function SettingsPage() {
                     <Field label="Capacity" type="number" min={1} value={libraryForm.capacity} onChange={(e) => setLibraryForm({ ...libraryForm, capacity: e.target.value })} />
                     <label><span className="label">Facilities</span><input className="input" value={libraryForm.facilities} onChange={(e) => setLibraryForm({ ...libraryForm, facilities: e.target.value })} required /></label>
                     <label className="sm:col-span-2"><span className="label">Fees</span><textarea className="input min-h-24" value={libraryForm.pricing} onChange={(e) => setLibraryForm({ ...libraryForm, pricing: e.target.value })} required /></label>
-                    <label className="sm:col-span-2"><span className="label">Photo URLs</span><textarea className="input min-h-24" value={libraryForm.photos} onChange={(e) => setLibraryForm({ ...libraryForm, photos: e.target.value })} /></label>
+                    <div className="sm:col-span-2 rounded-2xl border bg-stone-50/70 p-4 dark:bg-white/5">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                        <label className="flex-1"><span className="label">Library photos</span><input className="input" type="file" accept="image/*" multiple onChange={(e) => {
+                          const files = Array.from(e.target.files || []);
+                          imagePreviews.forEach((url) => URL.revokeObjectURL(url));
+                          setUploadFiles(files);
+                          setImagePreviews(files.map((file) => URL.createObjectURL(file)));
+                        }} /></label>
+                        <label className="sm:w-56"><span className="label">Photo type</span><select className="input" value={imageType} onChange={(e) => setImageType(e.target.value)}><option value="EXTERIOR">Exterior</option><option value="STUDY_HALL">Study Hall</option><option value="SEAT">Seat</option><option value="FACILITIES">Facilities</option><option value="OTHER">Other</option></select></label>
+                        <button type="button" onClick={uploadLibraryImages} disabled={loading || !uploadFiles.length} className="btn-primary"><Upload size={17} /> Upload</button>
+                      </div>
+                      {imagePreviews.length > 0 && <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">{imagePreviews.map((url) => <img key={url} src={url} alt="Selected library preview" className="aspect-[4/3] rounded-xl object-cover" />)}</div>}
+                      {settings.library.images?.length > 0 && <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">{settings.library.images.map((image: any) => <div key={image.id} className="overflow-hidden rounded-xl border bg-white dark:bg-white/5"><img src={image.url} alt={image.alt || "Library"} className="aspect-[4/3] w-full object-cover" /><p className="truncate px-2 py-1 text-[11px] font-bold text-stone-500">{image.type || "PHOTO"}{image.isCover ? " · Cover" : ""}</p></div>)}</div>}
+                    </div>
                     {message && <p className={`sm:col-span-2 rounded-lg p-3 text-sm ${message.includes("success") ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>{message}</p>}
                     <button disabled={loading} className="btn-primary sm:col-span-2">{loading ? "Saving..." : "Save Library Settings"}</button>
                   </form> : <p className="text-sm text-stone-500">Create a library from the owner dashboard before editing library settings.</p>}
@@ -1428,6 +1600,7 @@ function AppRoutes() {
     <Route path="/about" element={<About />} /><Route path="/login" element={<AuthPage mode="login" />} /><Route path="/register" element={<AuthPage mode="register" />} /><Route path="/for-owners" element={<ForOwners />} />
     <Route path="/forgot-password" element={<ForgotPasswordPage />} /><Route path="/reset-password" element={<ResetPasswordPage />} />
     <Route path="/dashboard" element={<Protected role="STUDENT"><StudentDashboard /></Protected>} />
+    <Route path="/community" element={<Authenticated><CommunityPage /></Authenticated>} />
     <Route path="/tasks" element={<Protected role="STUDENT"><TasksPage /></Protected>} />
     <Route path="/group-study" element={<Protected role="STUDENT"><GroupStudyPage /></Protected>} />
     <Route path="/report-issue" element={<Protected role="STUDENT"><ReportIssuePage /></Protected>} />

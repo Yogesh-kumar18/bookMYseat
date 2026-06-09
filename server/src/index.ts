@@ -44,6 +44,32 @@ if (env.CLOUDINARY_CLOUD_NAME) {
   });
 }
 
+const communityCategories = ["CURRENT_AFFAIRS", "VACANCIES", "STUDY_MATERIAL", "EXAM_UPDATES", "GENERAL_DISCUSSION"] as const;
+const complaintCategories = ["AC Issue", "WiFi Issue", "Seat Issue", "Cleanliness", "Noise", "Other"] as const;
+const libraryImageTypes = ["EXTERIOR", "STUDY_HALL", "SEAT", "FACILITIES", "OTHER"] as const;
+
+function mapsLink(library: { latitude?: number | null; longitude?: number | null; address: string; city: string; state: string }) {
+  if (library.latitude != null && library.longitude != null) return `https://www.google.com/maps/search/?api=1&query=${library.latitude},${library.longitude}`;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([library.address, library.city, library.state].filter(Boolean).join(", "))}`;
+}
+
+function reviewStats(reviews: { rating: number }[]) {
+  const reviewCount = reviews.length;
+  return {
+    rating: reviewCount ? reviews.reduce((sum, review) => sum + review.rating, 0) / reviewCount : null,
+    reviewCount
+  };
+}
+
+async function canReviewLibrary(studentId: string, libraryId: string) {
+  const [membership, booking, attendance] = await Promise.all([
+    prisma.studentMembership.findFirst({ where: { studentId, libraryId, status: "ACTIVE" }, select: { id: true } }),
+    prisma.booking.findFirst({ where: { studentId, libraryId, status: "APPROVED" }, select: { id: true } }),
+    prisma.attendance.findFirst({ where: { membership: { studentId, libraryId } }, select: { id: true } })
+  ]);
+  return Boolean(membership || booking || attendance);
+}
+
 app.get("/api/health", (_req, res) => res.json({ status: "ok", service: "bookmyseat-api" }));
 
 app.post("/api/auth/register", asyncRoute(async (req, res) => {
@@ -146,7 +172,7 @@ app.get("/api/me", authenticate, asyncRoute(async (req, res) => {
 app.get("/api/settings", authenticate, asyncRoute(async (req, res) => {
   const user = await prisma.user.findUnique({
     where: { id: req.user!.id },
-    include: { notificationPrefs: true, libraries: { take: 1 } }
+    include: { notificationPrefs: true, libraries: { take: 1, include: { images: true } } }
   });
   if (!user) return res.status(404).json({ message: "User not found" });
   
@@ -312,12 +338,18 @@ app.get("/api/libraries", asyncRoute(async (req, res) => {
     include: { images: true, reviews: { select: { rating: true } }, _count: { select: { seats: true } } },
     orderBy: { createdAt: "asc" }
   });
+  const selectedFacilities = facility.split(",").map((item) => item.trim().toLowerCase()).filter(Boolean);
   const result = libraries
-    .filter((library) => !facility || (library.facilities as string[]).some((item) => item.toLowerCase().includes(facility.toLowerCase())))
+    .filter((library) => {
+      if (!selectedFacilities.length) return true;
+      const facilities = Array.isArray(library.facilities) ? (library.facilities as string[]).map((item) => item.toLowerCase()) : [];
+      return selectedFacilities.every((selected) => facilities.some((item) => item === selected || item.includes(selected)));
+    })
     .map(({ reviews, ...library }) => ({
       ...library,
-      rating: reviews.length ? reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length : null,
-      reviewCount: reviews.length
+      ...reviewStats(reviews),
+      coverImage: library.images.find((image) => image.isCover)?.url ?? library.images[0]?.url ?? null,
+      mapsUrl: mapsLink(library)
     }));
   res.json(result);
 }));
@@ -334,7 +366,7 @@ app.get("/api/libraries/:slug", asyncRoute(async (req, res) => {
     }
   });
   if (!library) return res.status(404).json({ message: "Library not found" });
-  res.json(library);
+  res.json({ ...library, ...reviewStats(library.reviews), coverImage: library.images.find((image) => image.isCover)?.url ?? library.images[0]?.url ?? null, mapsUrl: mapsLink(library) });
 }));
 
 app.post("/api/libraries", authenticate, allow("OWNER"), asyncRoute(async (req, res) => {
@@ -359,17 +391,42 @@ app.post("/api/libraries/:id/images", authenticate, allow("OWNER"), upload.array
   if (!library) return res.status(404).json({ message: "Library not found" });
   if (!env.CLOUDINARY_CLOUD_NAME) return res.status(503).json({ message: "Cloudinary is not configured" });
   const files = (req.files as Express.Multer.File[]) ?? [];
+  const imageType = libraryImageTypes.includes(String(req.body.type) as typeof libraryImageTypes[number]) ? String(req.body.type) as typeof libraryImageTypes[number] : "OTHER";
   const records = [];
   for (const file of files) {
     const uploaded = await new Promise<{ secure_url: string; public_id: string }>((resolve, reject) => {
-      const stream = cloudinary.uploader.upload_stream({ folder: `bookmyseat/${library.id}` }, (error, result) => {
+      const stream = cloudinary.uploader.upload_stream({
+        folder: `bookmyseat/${library.id}`,
+        resource_type: "image",
+        transformation: [{ width: 1600, height: 1200, crop: "limit" }, { quality: "auto:good", fetch_format: "auto" }]
+      }, (error, result) => {
         if (error || !result) reject(error); else resolve(result as { secure_url: string; public_id: string });
       });
       stream.end(file.buffer);
     });
-    records.push(await prisma.libraryImage.create({ data: { libraryId: library.id, url: uploaded.secure_url, publicId: uploaded.public_id, isCover: records.length === 0 } }));
+    const existingImages = await prisma.libraryImage.count({ where: { libraryId: library.id } });
+    records.push(await prisma.libraryImage.create({ data: { libraryId: library.id, url: uploaded.secure_url, publicId: uploaded.public_id, type: imageType, alt: `${library.name} ${imageType.toLowerCase().replace("_", " ")}`, isCover: existingImages === 0 && records.length === 0 } }));
   }
   res.status(201).json(records);
+}));
+
+app.patch("/api/libraries/:id/images/:imageId/cover", authenticate, allow("OWNER"), asyncRoute(async (req, res) => {
+  const library = await prisma.library.findFirst({ where: { id: String(req.params.id), ownerId: req.user!.id } });
+  if (!library) return res.status(404).json({ message: "Library not found" });
+  const image = await prisma.libraryImage.findFirst({ where: { id: String(req.params.imageId), libraryId: library.id } });
+  if (!image) return res.status(404).json({ message: "Image not found" });
+  await prisma.libraryImage.updateMany({ where: { libraryId: library.id }, data: { isCover: false } });
+  res.json(await prisma.libraryImage.update({ where: { id: image.id }, data: { isCover: true } }));
+}));
+
+app.delete("/api/libraries/:id/images/:imageId", authenticate, allow("OWNER"), asyncRoute(async (req, res) => {
+  const library = await prisma.library.findFirst({ where: { id: String(req.params.id), ownerId: req.user!.id } });
+  if (!library) return res.status(404).json({ message: "Library not found" });
+  const image = await prisma.libraryImage.findFirst({ where: { id: String(req.params.imageId), libraryId: library.id } });
+  if (!image) return res.status(404).json({ message: "Image not found" });
+  if (image.publicId && env.CLOUDINARY_CLOUD_NAME) await cloudinary.uploader.destroy(image.publicId).catch(() => undefined);
+  await prisma.libraryImage.delete({ where: { id: image.id } });
+  res.status(204).send();
 }));
 
 app.post("/api/libraries/:id/bookings", authenticate, allow("STUDENT"), asyncRoute(async (req, res) => {
@@ -404,6 +461,29 @@ app.post("/api/libraries/:id/favorite", authenticate, allow("STUDENT"), asyncRou
   }
   await prisma.favorite.create({ data: { studentId: req.user!.id, libraryId: String(req.params.id) } });
   res.status(201).json({ favorite: true });
+}));
+
+app.get("/api/libraries/:id/review-eligibility", authenticate, allow("STUDENT"), asyncRoute(async (req, res) => {
+  const library = await prisma.library.findFirst({ where: { id: String(req.params.id), status: "ACTIVE" }, select: { id: true } });
+  if (!library) return res.status(404).json({ message: "Library not found" });
+  const [eligible, existingReview] = await Promise.all([
+    canReviewLibrary(req.user!.id, library.id),
+    prisma.review.findUnique({ where: { studentId_libraryId: { studentId: req.user!.id, libraryId: library.id } } })
+  ]);
+  res.json({ eligible, review: existingReview });
+}));
+
+app.post("/api/libraries/:id/reviews", authenticate, allow("STUDENT"), asyncRoute(async (req, res) => {
+  const data = z.object({ rating: z.number().int().min(1).max(5), comment: z.string().max(1000).optional() }).parse(req.body);
+  const library = await prisma.library.findFirst({ where: { id: String(req.params.id), status: "ACTIVE" }, select: { id: true } });
+  if (!library) return res.status(404).json({ message: "Library not found" });
+  if (!(await canReviewLibrary(req.user!.id, library.id))) return res.status(403).json({ message: "Only verified students can review this library." });
+  const review = await prisma.review.upsert({
+    where: { studentId_libraryId: { studentId: req.user!.id, libraryId: library.id } },
+    create: { studentId: req.user!.id, libraryId: library.id, rating: data.rating, comment: data.comment },
+    update: { rating: data.rating, comment: data.comment }
+  });
+  res.status(201).json(review);
 }));
 
 app.get("/api/student/dashboard", authenticate, allow("STUDENT"), asyncRoute(async (req, res) => {
@@ -477,7 +557,7 @@ app.delete("/api/tasks/:id", authenticate, allow("STUDENT"), asyncRoute(async (r
 }));
 
 app.post("/api/complaints", authenticate, allow("STUDENT"), asyncRoute(async (req, res) => {
-  const data = z.object({ libraryId: z.string(), title: z.string().min(2).max(120), category: z.string().min(2).max(80), description: z.string().min(5).max(1000) }).parse(req.body);
+  const data = z.object({ libraryId: z.string(), title: z.string().min(2).max(120), category: z.enum(complaintCategories), description: z.string().min(5).max(1000) }).parse(req.body);
   const membership = await prisma.studentMembership.findFirst({ where: { studentId: req.user!.id, libraryId: data.libraryId, status: "ACTIVE" }, include: { library: true } });
   if (!membership) return res.status(403).json({ message: "An active membership is required to submit a complaint" });
   const complaint = await prisma.complaint.create({ data: { ...data, studentId: req.user!.id } });
@@ -491,6 +571,15 @@ app.post("/api/complaints", authenticate, allow("STUDENT"), asyncRoute(async (re
     });
   }
   res.status(201).json(complaint);
+}));
+
+app.get("/api/complaints", authenticate, allow("STUDENT"), asyncRoute(async (req, res) => {
+  const complaints = await prisma.complaint.findMany({
+    where: { studentId: req.user!.id },
+    include: { library: { select: { id: true, name: true } } },
+    orderBy: { createdAt: "desc" }
+  });
+  res.json({ complaints, categories: complaintCategories });
 }));
 
 app.patch("/api/complaints/:id", authenticate, allow("OWNER"), asyncRoute(async (req, res) => {
@@ -769,6 +858,103 @@ app.get("/api/admin/dashboard", authenticate, allow("ADMIN"), asyncRoute(async (
 app.patch("/api/admin/users/:id/status", authenticate, allow("ADMIN"), asyncRoute(async (req, res) => {
   const { status } = z.object({ status: z.enum(["ACTIVE", "SUSPENDED"]) }).parse(req.body);
   res.json(await prisma.user.update({ where: { id: String(req.params.id) }, data: { status }, select: { id: true, status: true } }));
+}));
+
+app.get("/api/community/posts", authenticate, asyncRoute(async (req, res) => {
+  const search = String(req.query.search ?? "").trim();
+  const category = String(req.query.category ?? "").trim();
+  const blocked = await prisma.userBlock.findMany({ where: { blockerId: req.user!.id }, select: { blockedId: true } });
+  const blockedIds = blocked.map((item) => item.blockedId);
+  const posts = await prisma.communityPost.findMany({
+    where: {
+      isDeleted: false,
+      authorId: blockedIds.length ? { notIn: blockedIds } : undefined,
+      ...(communityCategories.includes(category as typeof communityCategories[number]) ? { category: category as typeof communityCategories[number] } : {}),
+      ...(search ? { OR: [{ title: { contains: search } }, { body: { contains: search } }] } : {})
+    },
+    include: {
+      author: { select: { id: true, name: true, role: true } },
+      comments: { where: { isDeleted: false }, include: { author: { select: { id: true, name: true, role: true } } }, orderBy: { createdAt: "asc" }, take: 5 },
+      reactions: true,
+      _count: { select: { comments: true, reactions: true, reports: true } }
+    },
+    orderBy: { createdAt: "desc" },
+    take: 50
+  });
+  res.json({ posts, categories: communityCategories });
+}));
+
+app.post("/api/community/posts", authenticate, allow("STUDENT", "OWNER", "ADMIN"), asyncRoute(async (req, res) => {
+  const data = z.object({
+    category: z.enum(communityCategories),
+    title: z.string().min(3).max(140),
+    body: z.string().min(5).max(4000)
+  }).parse(req.body);
+  const post = await prisma.communityPost.create({
+    data: { ...data, authorId: req.user!.id },
+    include: { author: { select: { id: true, name: true, role: true } }, comments: true, reactions: true, _count: { select: { comments: true, reactions: true, reports: true } } }
+  });
+  res.status(201).json(post);
+}));
+
+app.post("/api/community/posts/:id/comments", authenticate, allow("STUDENT", "OWNER", "ADMIN"), asyncRoute(async (req, res) => {
+  const data = z.object({ body: z.string().min(2).max(1200) }).parse(req.body);
+  const post = await prisma.communityPost.findFirst({ where: { id: String(req.params.id), isDeleted: false } });
+  if (!post) return res.status(404).json({ message: "Post not found" });
+  const comment = await prisma.communityComment.create({ data: { postId: post.id, authorId: req.user!.id, body: data.body }, include: { author: { select: { id: true, name: true, role: true } } } });
+  res.status(201).json(comment);
+}));
+
+app.post("/api/community/posts/:id/reactions", authenticate, allow("STUDENT", "OWNER", "ADMIN"), asyncRoute(async (req, res) => {
+  const post = await prisma.communityPost.findFirst({ where: { id: String(req.params.id), isDeleted: false } });
+  if (!post) return res.status(404).json({ message: "Post not found" });
+  const key = { postId_userId_type: { postId: post.id, userId: req.user!.id, type: "LIKE" } };
+  const existing = await prisma.communityReaction.findUnique({ where: key });
+  if (existing) {
+    await prisma.communityReaction.delete({ where: key });
+    return res.json({ reacted: false });
+  }
+  await prisma.communityReaction.create({ data: { postId: post.id, userId: req.user!.id, type: "LIKE" } });
+  res.status(201).json({ reacted: true });
+}));
+
+app.post("/api/community/reports", authenticate, allow("STUDENT", "OWNER", "ADMIN"), asyncRoute(async (req, res) => {
+  const data = z.object({ postId: z.string().optional(), commentId: z.string().optional(), reason: z.string().min(3).max(500) }).refine((value) => value.postId || value.commentId, "Report a post or comment").parse(req.body);
+  const report = await prisma.communityReport.create({ data: { reporterId: req.user!.id, postId: data.postId, commentId: data.commentId, reason: data.reason } });
+  res.status(201).json(report);
+}));
+
+app.post("/api/community/block/:userId", authenticate, allow("STUDENT", "OWNER", "ADMIN"), asyncRoute(async (req, res) => {
+  const blockedId = String(req.params.userId);
+  if (blockedId === req.user!.id) return res.status(400).json({ message: "You cannot block yourself." });
+  await prisma.userBlock.upsert({ where: { blockerId_blockedId: { blockerId: req.user!.id, blockedId } }, create: { blockerId: req.user!.id, blockedId }, update: {} });
+  res.status(201).json({ blocked: true });
+}));
+
+app.delete("/api/community/posts/:id", authenticate, allow("OWNER", "ADMIN"), asyncRoute(async (req, res) => {
+  res.json(await prisma.communityPost.update({ where: { id: String(req.params.id) }, data: { isDeleted: true } }));
+}));
+
+app.delete("/api/community/comments/:id", authenticate, allow("OWNER", "ADMIN"), asyncRoute(async (req, res) => {
+  res.json(await prisma.communityComment.update({ where: { id: String(req.params.id) }, data: { isDeleted: true } }));
+}));
+
+app.get("/api/community/moderation", authenticate, allow("OWNER", "ADMIN"), asyncRoute(async (_req, res) => {
+  const reports = await prisma.communityReport.findMany({
+    where: { status: { in: ["OPEN", "IN_REVIEW"] } },
+    include: {
+      reporter: { select: { name: true, email: true } },
+      post: { include: { author: { select: { name: true, email: true, status: true } } } },
+      comment: { include: { author: { select: { name: true, email: true, status: true } } } }
+    },
+    orderBy: { createdAt: "desc" }
+  });
+  res.json({ reports });
+}));
+
+app.patch("/api/community/reports/:id", authenticate, allow("OWNER", "ADMIN"), asyncRoute(async (req, res) => {
+  const data = z.object({ status: z.enum(["OPEN", "IN_REVIEW", "RESOLVED", "DISMISSED"]) }).parse(req.body);
+  res.json(await prisma.communityReport.update({ where: { id: String(req.params.id) }, data }));
 }));
 
 app.use((_req, res) => res.status(404).json({ message: "Route not found" }));
