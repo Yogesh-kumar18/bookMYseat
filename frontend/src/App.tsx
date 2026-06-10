@@ -8,7 +8,7 @@ import {
   AlertCircle, BookMarked, Settings, Home as HomeIcon, Zap, Image as ImageIcon, Navigation, Flag, ThumbsUp, Send, Ban,
   Paperclip, Smile, Reply, FileText, Video, MoreVertical, Award, Crown, ShieldAlert, UserCircle, MessageCircle, Megaphone
 } from "lucide-react";
-import { api, type CommunityChannel, type CommunityMessage, type Library, type Role } from "./api";
+import { api, type CommunityChannel, type CommunityConnection, type CommunityMessage, type Library, type Role } from "./api";
 import { AuthProvider, useAuth } from "./auth";
 import { isIosSafari, isStandaloneDisplay, type BeforeInstallPromptEvent } from "./pwa";
 
@@ -391,8 +391,6 @@ function CompactStudentDashboard() {
 
   const activeMemberships = data.memberships.filter((item: any) => item.status === "ACTIVE");
   const currentMembership = activeMemberships[0] || data.memberships[0];
-  const pendingRequests = data.bookings.filter((item: any) => ["PENDING", "WAITLISTED"].includes(item.status));
-  const unreadNotifications = data.notifications.filter((item: any) => !item.isRead).length;
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
   const weekStart = new Date(today); weekStart.setDate(today.getDate() - today.getDay());
@@ -405,127 +403,67 @@ function CompactStudentDashboard() {
     return startedAt >= weekStart ? sum + item.durationMin : sum;
   }, 0);
   const todayHours = sessionsToday.reduce((sum: number, item: any) => sum + item.durationMin, 0) / 60;
+  const dailyGoalHours = 6;
+  const dailyGoalPercent = Math.min(100, Math.round((todayHours / dailyGoalHours) * 100));
   const weeklyGoalHours = 20;
   const weeklyGoalPercent = Math.min(100, Math.round((weeklyMinutes / 60 / weeklyGoalHours) * 100));
-  const activeGroups = data.groupBookings.filter((item: any) => ["INVITING", "PENDING", "APPROVED"].includes(item.status));
-  const pendingInviteCount = data.groupBookings.reduce((sum: number, item: any) => sum + item.members.filter((member: any) => !member.accepted).length, 0);
-  const latestAnnouncements = data.announcements.slice(0, 5);
-  const latestComplaints = data.complaints.slice(0, 3);
-  const todayTasks = data.tasks || [];
   const firstName = user?.name?.split(" ")[0] || "Student";
-  const expiryDate = currentMembership?.endDate ? new Date(currentMembership.endDate) : null;
-  const daysRemaining = expiryDate ? Math.max(0, Math.ceil((expiryDate.getTime() - Date.now()) / 86_400_000)) : null;
   const currentStreak = data.streak?.currentDays || 0;
   const streak = getStreakStyle(currentStreak);
   const badges = getConsistencyBadges(currentStreak);
   const unlockedBadges = badges.filter((badge) => badge.unlocked);
-  const completedTasks = todayTasks.filter((task: any) => task.isCompleted).length;
-  const communityUpdates = [
-    { title: "Mathura Community", text: "Share notes, vacancies, exam updates and current affairs with verified students.", icon: <MessageSquare size={18} />, to: "/community" },
-    { title: currentMembership?.library?.name ? `${currentMembership.library.name} Group` : "Library groups", text: currentMembership ? "Coordinate seats, timing changes and daily library updates." : "Join a library to unlock library-wise groups.", icon: <Users size={18} />, to: "/community" },
-    { title: "Direct messages", text: "Message classmates privately, share notes, and use report or block controls when needed.", icon: <ShieldCheck size={18} />, to: "/community" }
-  ];
+  const nextBadge = badges.find((badge) => !badge.unlocked);
+  const streakGoalDays = nextBadge?.days || Math.max(365, currentStreak);
+  const streakPercent = streakGoalDays ? Math.min(100, Math.round((currentStreak / streakGoalDays) * 100)) : 100;
+  const badgePercent = nextBadge ? streakPercent : 100;
+  const progressRows = [
+    ["Daily study progress", `${todayHours.toFixed(1)}h / ${dailyGoalHours}h`, dailyGoalPercent],
+    ["Weekly progress", `${(weeklyMinutes / 60).toFixed(1)}h / ${weeklyGoalHours}h`, weeklyGoalPercent],
+    ["Streak progress", `${currentStreak} / ${streakGoalDays} days`, streakPercent],
+    ["Badge progress", nextBadge ? `Level ${nextBadge.level} at ${nextBadge.days} days` : "All core badges unlocked", badgePercent]
+  ] as const;
 
   return <StudentDashboardLayout>
     <div className="min-h-screen bg-[#f6f6f1] dark:bg-[#0d130f]">
       <main className="container-app space-y-5 py-5 sm:py-8">
-        <section className={`overflow-hidden rounded-3xl border p-5 text-white shadow-soft ${streak.panel}`}>
+        <section className={`overflow-hidden rounded-3xl border p-5 text-white shadow-soft sm:p-7 ${streak.panel}`}>
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
-              <p className="text-xs font-bold uppercase tracking-[.18em] text-white/70">Welcome Header</p>
+              <p className="text-xs font-bold uppercase tracking-[.18em] text-white/70">Study Progress</p>
               <h1 className="mt-2 max-w-xl font-display text-3xl font-extrabold leading-tight sm:text-5xl">Welcome back, {firstName}</h1>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-white/80">Study smarter today. Your seat, groups, tasks, updates and consistency streak are all ready.</p>
-              <div className="mt-5 flex flex-wrap gap-2">
-                <Link to="/community" className="rounded-xl bg-white px-4 py-2 text-sm font-extrabold text-ink"><MessageSquare size={16} className="mr-1 inline" /> Open Community</Link>
-                <Link to="/tasks" className="rounded-xl border border-white/30 px-4 py-2 text-sm font-extrabold text-white">Plan Today</Link>
-              </div>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-white/80">Your daily focus, weekly rhythm, streak, and badge path in one place.</p>
             </div>
             <Link to="/settings" aria-label="Profile settings" className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-white/15 text-lg font-extrabold ring-1 ring-white/20">{firstName.charAt(0).toUpperCase()}</Link>
+          </div>
+          <div className="mt-6 grid gap-4 lg:grid-cols-2">
+            {progressRows.map(([label, value, percent]) => <div key={label} className="rounded-2xl bg-white/12 p-4 ring-1 ring-white/15">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-extrabold">{label}</p>
+                <p className="shrink-0 text-sm font-bold text-white/80">{value}</p>
+              </div>
+              <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-white/25">
+                <div className="h-full rounded-full bg-white" style={{ width: `${percent}%` }} />
+              </div>
+            </div>)}
+          </div>
+          <div className="mt-5 flex flex-wrap items-center gap-3 text-sm font-semibold text-white/80">
+            <span>{streak.label}</span>
+            <span>{unlockedBadges.length} badge{unlockedBadges.length === 1 ? "" : "s"} unlocked</span>
           </div>
         </section>
 
         <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {[
-            [<BookOpen size={18} />, "Active Memberships", String(activeMemberships.length), "Libraries you can access"],
+            [<BookOpen size={18} />, "Active Membership", currentMembership ? currentMembership.status : "None", currentMembership?.library?.name || "No active library"],
             [<MapPin size={18} />, "Current Seat", currentMembership?.seat?.number || "Unassigned", currentMembership?.library?.name || "No active library"],
-            [<Clock3 size={18} />, "Days Remaining", daysRemaining == null ? "Not set" : String(daysRemaining), "Membership validity"],
-            [<Bell size={18} />, "Unread Counts", String(unreadNotifications), "Notifications waiting"]
+            [<Flame size={18} />, "Current Streak", `${currentStreak} day${currentStreak === 1 ? "" : "s"}`, streak.label],
+            [<Clock3 size={18} />, "Hours Studied Today", `${todayHours.toFixed(1)}h`, `${dailyGoalPercent}% of daily goal`]
           ].map(([icon, label, value, hint]) => <div key={String(label)} className="rounded-2xl border bg-white p-4 shadow-soft dark:bg-white/[.04]">
             <span className="grid h-10 w-10 place-items-center rounded-xl bg-ink text-white dark:bg-white dark:text-ink">{icon}</span>
             <p className="mt-4 text-xs font-bold uppercase tracking-wide text-stone-500">{label}</p>
             <p className="mt-1 truncate font-display text-2xl font-extrabold">{value}</p>
             <p className="mt-1 truncate text-xs text-stone-500">{hint}</p>
           </div>)}
-        </section>
-
-        <section className="grid gap-5 lg:grid-cols-[minmax(0,1.4fr)_minmax(300px,.8fr)]">
-          <div className="rounded-3xl border bg-white p-5 shadow-soft dark:bg-white/[.04]">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div><p className="text-xs font-bold uppercase tracking-[.16em] text-moss">Membership Overview</p><h2 className="mt-1 font-display text-2xl font-extrabold">{currentMembership?.library?.name || "No active membership"}</h2></div>
-              {currentMembership ? <Status value={currentMembership.status} /> : null}
-            </div>
-            {currentMembership ? <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              {[
-                ["Seat", currentMembership.seat?.number || "Unassigned"],
-                ["Monthly Fee", money.format(currentMembership.monthlyFee)],
-                ["Expires", currentMembership.endDate ? new Date(currentMembership.endDate).toLocaleDateString() : "Not set"],
-                ["Pending Requests", String(pendingRequests.length)]
-              ].map(([label, value]) => <div key={label} className="rounded-2xl border bg-stone-50 p-4 dark:bg-white/5"><p className="text-xs text-stone-500">{label}</p><p className="mt-1 text-lg font-extrabold">{value}</p></div>)}
-            </div> : <div className="mt-5 rounded-2xl border border-dashed p-5"><p className="font-bold">Start with a verified study library.</p><p className="mt-1 text-sm text-stone-500">Explore nearby libraries and request your first seat.</p></div>}
-            <div className="mt-5 flex flex-wrap gap-2">
-              {currentMembership && <a href={`tel:${currentMembership.library.phone}`} className="btn-secondary !px-4 !py-2 text-sm"><Phone size={16} /> Owner</a>}
-              <Link to="/membership" className="btn-secondary !px-4 !py-2 text-sm"><Star size={16} /> Membership</Link>
-              <Link to="/discover" className="btn-primary !px-4 !py-2 text-sm"><Search size={16} /> Find Library</Link>
-            </div>
-          </div>
-
-          <div className={`rounded-3xl border p-5 shadow-soft ${streak.card}`}>
-            <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[.16em] opacity-70">Streak System</p><h2 className="mt-1 font-display text-2xl font-extrabold">{currentStreak} day streak</h2><p className="mt-1 text-sm opacity-75">{streak.label}</p></div><Flame size={34} className="shrink-0" /></div>
-            <div className="mt-5 grid grid-cols-3 gap-2 text-center">
-              <div className="rounded-2xl bg-white/60 p-3 dark:bg-black/15"><p className="text-xs opacity-70">Today</p><p className="font-extrabold">{todayHours.toFixed(1)}h</p></div>
-              <div className="rounded-2xl bg-white/60 p-3 dark:bg-black/15"><p className="text-xs opacity-70">Week</p><p className="font-extrabold">{weeklyGoalPercent}%</p></div>
-              <div className="rounded-2xl bg-white/60 p-3 dark:bg-black/15"><p className="text-xs opacity-70">Best</p><p className="font-extrabold">{data.streak?.longestDays || 0}</p></div>
-            </div>
-            <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/50 dark:bg-black/20"><div className="h-full rounded-full bg-current" style={{ width: `${weeklyGoalPercent}%` }} /></div>
-          </div>
-        </section>
-
-        <section className="rounded-3xl border bg-white p-5 shadow-soft dark:bg-white/[.04]">
-          <div className="flex items-center justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[.16em] text-moss">Announcements</p><h2 className="mt-1 font-display text-xl font-extrabold">Library updates</h2></div><Link to="/announcements" className="text-sm font-bold text-moss">View all</Link></div>
-          <div className="mt-4 grid gap-3 md:grid-cols-2">
-            {latestAnnouncements.map((item: any) => <article key={item.id} className="rounded-2xl border bg-stone-50 p-4 dark:bg-white/5"><p className="text-xs font-bold uppercase tracking-wide text-stone-500">{item.library.name}</p><h3 className="mt-1 font-bold">{item.title}</h3><p className="mt-1 line-clamp-2 text-sm text-stone-500">{item.message}</p></article>)}
-            {!latestAnnouncements.length && <p className="rounded-2xl border border-dashed p-5 text-center text-sm text-stone-500">No announcements yet.</p>}
-          </div>
-        </section>
-
-        <section className="rounded-3xl border bg-white p-5 shadow-soft dark:bg-white/[.04]">
-          <div><p className="text-xs font-bold uppercase tracking-[.16em] text-moss">Community Updates</p><h2 className="mt-1 font-display text-xl font-extrabold">Groups and messages</h2></div>
-          <div className="mt-4 grid gap-3 md:grid-cols-3">{communityUpdates.map((item) => <Link key={item.title} to={item.to} className="rounded-2xl border p-4 transition hover:border-moss hover:bg-moss/5">
-            <span className="grid h-10 w-10 place-items-center rounded-xl bg-moss/10 text-moss">{item.icon}</span><h3 className="mt-3 font-bold">{item.title}</h3><p className="mt-1 text-sm leading-5 text-stone-500">{item.text}</p>
-          </Link>)}</div>
-        </section>
-
-        <section className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="rounded-3xl border bg-white p-5 shadow-soft dark:bg-white/[.04]">
-            <div className="flex items-center justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[.16em] text-moss">Tasks</p><h2 className="mt-1 font-display text-xl font-extrabold">{completedTasks}/{todayTasks.length || 0} complete today</h2></div><Link to="/tasks" className="text-sm font-bold text-moss">Open</Link></div>
-            <div className="mt-4 grid gap-2">{todayTasks.slice(0, 5).map((task: any) => <div key={task.id} className="flex min-h-12 items-center gap-3 rounded-2xl border px-4 text-sm"><span className={`grid h-5 w-5 place-items-center rounded-md border ${task.isCompleted ? "border-moss bg-moss text-white" : ""}`}>{task.isCompleted && <Check size={13} />}</span><span className={task.isCompleted ? "text-stone-400 line-through" : "font-semibold"}>{task.title}</span></div>)}{!todayTasks.length && <p className="rounded-2xl border border-dashed p-5 text-center text-sm text-stone-500">No tasks for today.</p>}</div>
-          </div>
-
-          <div className="rounded-3xl border bg-white p-5 shadow-soft dark:bg-white/[.04]">
-            <p className="text-xs font-bold uppercase tracking-[.16em] text-moss">Badge System</p><h2 className="mt-1 font-display text-xl font-extrabold">Profile badges</h2>
-            <div className="mt-4 grid grid-cols-2 gap-2">{badges.map((badge) => <div key={badge.level} className={`unlock-pop rounded-2xl border p-3 ${badge.unlocked ? badge.color : "bg-stone-50 text-stone-400 dark:bg-white/5"}`}>
-              <span className="grid h-9 w-9 place-items-center rounded-xl bg-white/70 dark:bg-black/10">{badge.icon}</span><p className="mt-2 text-sm font-extrabold">Level {badge.level}</p><p className="text-xs">{badge.days} days</p>
-            </div>)}</div>
-            <p className="mt-3 text-xs text-stone-500">{unlockedBadges.length ? `${unlockedBadges.length} consistency badges shown on your profile.` : "Reach a 50 day streak to unlock your first profile badge."}</p>
-          </div>
-        </section>
-
-        <section className="rounded-3xl border bg-white p-5 shadow-soft dark:bg-white/[.04]">
-          <div><p className="text-xs font-bold uppercase tracking-[.16em] text-moss">Quick Actions</p><h2 className="mt-1 font-display text-xl font-extrabold">Next useful moves</h2></div>
-          <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-            {[["Community", "/community", <MessageSquare size={17} />], ["Group Study", "/group-study", <Users size={17} />], ["Report Issue", "/report-issue", <ShieldAlert size={17} />], ["Notifications", "/notifications", <Bell size={17} />]].map(([label, to, icon]) => <Link key={String(label)} to={String(to)} className="btn-secondary !justify-start !px-4 !py-3 text-sm">{icon}{label}</Link>)}
-          </div>
-          {latestComplaints.length > 0 && <div className="mt-4 grid gap-2">{latestComplaints.map((item: any) => <div key={item.id} className="rounded-2xl border bg-stone-50 p-3 text-sm dark:bg-white/5"><div className="flex items-center justify-between gap-2"><b>{item.title}</b><Status value={item.status} /></div></div>)}</div>}
         </section>
       </main>
     </div>
@@ -1036,7 +974,10 @@ function CommunityPage() {
   const [profileUser, setProfileUser] = useState<{ id: string; name: string; role: Role } | null>(null);
   const [reporting, setReporting] = useState<{ messageId?: string; userId?: string } | null>(null);
   const { data: channelData, isLoading: channelsLoading } = useQuery({ queryKey: ["community-channels"], queryFn: () => api<{ channels: CommunityChannel[] }>("/community/channels"), refetchInterval: 30_000 });
+  const { data: connectionData } = useQuery({ queryKey: ["community-connections"], queryFn: () => api<{ connections: CommunityConnection[] }>("/community/connections"), refetchInterval: 30_000 });
   const channels = channelData?.channels || [];
+  const connections = connectionData?.connections || [];
+  const incomingRequests = connections.filter((item) => item.receiverId === user?.id && item.status === "PENDING");
   const activeChannel = channels.find((channel) => channel.id === activeChannelId) || channels[0];
   useEffect(() => { if (!activeChannelId && channels[0]) setActiveChannelId(channels[0].id); }, [activeChannelId, channels]);
   const { data: messageData, isLoading: messagesLoading } = useQuery({
@@ -1049,6 +990,7 @@ function CommunityPage() {
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["community-channels"] });
     queryClient.invalidateQueries({ queryKey: ["community-messages"] });
+    queryClient.invalidateQueries({ queryKey: ["community-connections"] });
   };
   const sendMessage = useMutation({
     mutationFn: () => api(`/community/channels/${activeChannel!.id}/messages`, {
@@ -1059,7 +1001,10 @@ function CommunityPage() {
   });
   const react = useMutation({ mutationFn: ({ id, emoji }: { id: string; emoji: string }) => api(`/community/messages/${id}/reactions`, { method: "POST", body: JSON.stringify({ emoji }) }), onSuccess: refresh });
   const removeMessage = useMutation({ mutationFn: (id: string) => api(`/community/messages/${id}`, { method: "DELETE" }), onSuccess: refresh });
-  const direct = useMutation({ mutationFn: (userId: string) => api<CommunityChannel>("/community/direct", { method: "POST", body: JSON.stringify({ userId }) }), onSuccess: (channel) => { setActiveChannelId(channel.id); setProfileUser(null); refresh(); } });
+  const direct = useMutation({ mutationFn: (userId: string) => api<CommunityChannel>("/community/direct", { method: "POST", body: JSON.stringify({ userId }) }), onSuccess: (channel) => { setActiveChannelId(channel.id); setProfileUser(null); refresh(); }, onError: (error) => alert(error.message) });
+  const requestConnection = useMutation({ mutationFn: (userId: string) => api("/community/connections", { method: "POST", body: JSON.stringify({ userId }) }), onSuccess: refresh, onError: (error) => alert(error.message) });
+  const updateConnection = useMutation({ mutationFn: ({ id, status }: { id: string; status: "ACCEPTED" | "REJECTED" }) => api(`/community/connections/${id}`, { method: "PATCH", body: JSON.stringify({ status }) }), onSuccess: refresh });
+  const removeConnection = useMutation({ mutationFn: (userId: string) => api(`/community/connections/${userId}`, { method: "DELETE" }), onSuccess: () => { setProfileUser(null); refresh(); } });
   const block = useMutation({ mutationFn: (userId: string) => api(`/community/block/${userId}`, { method: "POST" }), onSuccess: () => { setProfileUser(null); refresh(); } });
   const mute = useMutation({ mutationFn: (userId: string) => api(`/community/mute/${userId}`, { method: "POST" }), onSuccess: () => setProfileUser(null) });
   const report = useMutation({
@@ -1078,6 +1023,10 @@ function CommunityPage() {
     reader.onload = () => setAttachment({ url: String(reader.result), name: file.name, mime: file.type || "application/octet-stream" });
     reader.readAsDataURL(file);
   };
+  const profileConnection = profileUser ? connections.find((item) =>
+    (item.requesterId === user?.id && item.receiverId === profileUser.id) ||
+    (item.requesterId === profileUser.id && item.receiverId === user?.id)
+  ) : null;
 
   return <StudentDashboardLayout>
     <main className="h-[calc(100vh-82px)] bg-[#eef1ee] p-0 dark:bg-[#0d130f] md:h-screen md:p-5">
@@ -1085,9 +1034,16 @@ function CommunityPage() {
         <aside className="hidden border-r bg-[#f8f8f5] dark:bg-white/[.03] lg:block">
           <div className="border-b p-4">
             <div className="flex items-center justify-between"><div><p className="text-xs font-bold uppercase tracking-[.16em] text-moss">Community</p><h1 className="font-display text-2xl font-extrabold">Student Chats</h1></div><NotificationBell /></div>
-            <p className="mt-2 text-sm text-stone-500">Global, library-wise groups and private direct messages.</p>
+            <p className="mt-2 text-sm text-stone-500">Group chats first. Private chat opens after approval.</p>
           </div>
           <div className="max-h-[calc(100vh-150px)] overflow-y-auto p-3">
+            {incomingRequests.length > 0 && <div className="mb-3 rounded-2xl border bg-white p-3 dark:bg-white/5">
+              <p className="text-xs font-bold uppercase tracking-[.14em] text-moss">Connection Requests</p>
+              <div className="mt-2 grid gap-2">{incomingRequests.map((request) => <div key={request.id} className="rounded-xl bg-stone-50 p-2 dark:bg-black/15">
+                <div className="flex items-center gap-2"><Avatar user={request.requester} /><span className="min-w-0 flex-1 truncate text-sm font-bold">{request.requester.name}</span></div>
+                <div className="mt-2 grid grid-cols-2 gap-2"><button onClick={() => updateConnection.mutate({ id: request.id, status: "ACCEPTED" })} className="rounded-lg bg-moss px-2 py-1.5 text-xs font-bold text-white">Accept</button><button onClick={() => updateConnection.mutate({ id: request.id, status: "REJECTED" })} className="rounded-lg border px-2 py-1.5 text-xs font-bold">Reject</button></div>
+              </div>)}</div>
+            </div>}
             {channelsLoading && <p className="p-4 text-sm text-stone-500">Loading groups...</p>}
             {channels.map((channel) => <button key={channel.id} onClick={() => setActiveChannelId(channel.id)} className={`mb-2 flex w-full items-center gap-3 rounded-2xl p-3 text-left transition ${activeChannel?.id === channel.id ? "bg-ink text-white" : "hover:bg-stone-100 dark:hover:bg-white/5"}`}>
               <ChannelIcon channel={channel} />
@@ -1105,6 +1061,14 @@ function CommunityPage() {
             {activeChannel && <><ChannelIcon channel={activeChannel} /><div className="min-w-0 flex-1"><h2 className="truncate font-display text-lg font-extrabold">{directChannelName(activeChannel, user?.id)}</h2><p className="truncate text-xs text-stone-500">{activeChannel.type === "GLOBAL" ? "Mathura Community" : activeChannel.type === "LIBRARY" ? "Library-wise Group" : "Private Direct Message"} · {activeChannel.members?.length || 0} members</p></div></>}
             <Link to="/report-issue" className="grid h-10 w-10 place-items-center rounded-xl border" aria-label="Community safety"><ShieldCheck size={18} /></Link>
           </header>
+          {incomingRequests.length > 0 && <div className="border-b bg-emerald-50/70 px-3 py-2 dark:bg-emerald-500/10 lg:hidden">
+            <div className="flex gap-2 overflow-x-auto">{incomingRequests.map((request) => <div key={request.id} className="flex min-w-64 items-center gap-2 rounded-xl bg-white p-2 shadow-sm dark:bg-[#111713]">
+              <Avatar user={request.requester} />
+              <span className="min-w-0 flex-1 truncate text-sm font-bold">{request.requester.name}</span>
+              <button onClick={() => updateConnection.mutate({ id: request.id, status: "ACCEPTED" })} className="rounded-lg bg-moss px-2 py-1 text-xs font-bold text-white">Accept</button>
+              <button onClick={() => updateConnection.mutate({ id: request.id, status: "REJECTED" })} className="rounded-lg border px-2 py-1 text-xs font-bold">Reject</button>
+            </div>)}</div>
+          </div>}
 
           <div className="flex-1 overflow-y-auto bg-[linear-gradient(rgba(47,107,79,.05)_1px,transparent_1px),linear-gradient(90deg,rgba(47,107,79,.05)_1px,transparent_1px)] bg-[size:28px_28px] p-3 sm:p-5">
             {messagesLoading && <p className="mx-auto mt-10 rounded-2xl bg-white p-4 text-center text-sm text-stone-500 shadow-soft dark:bg-[#111713]">Loading messages...</p>}
@@ -1132,7 +1096,13 @@ function CommunityPage() {
         <div className="flex items-center justify-between"><h2 className="font-display text-xl font-extrabold">Student Profile</h2><button onClick={() => setProfileUser(null)} className="grid h-10 w-10 place-items-center rounded-xl border"><X size={18} /></button></div>
         <div className="mt-6 text-center"><Avatar user={profileUser} size="lg" /><h3 className="mt-3 font-display text-2xl font-extrabold">{profileUser.name}</h3><p className="mt-1 text-sm font-semibold text-stone-500">{profileUser.role}</p></div>
         {profileUser.id !== user?.id && <div className="mt-6 grid gap-2">
-          <button onClick={() => direct.mutate(profileUser.id)} className="btn-primary w-full"><MessageCircle size={17} /> Start private chat</button>
+          {profileConnection?.status === "ACCEPTED" ? <>
+            <button onClick={() => direct.mutate(profileUser.id)} className="btn-primary w-full"><MessageCircle size={17} /> Open private chat</button>
+            <button onClick={() => removeConnection.mutate(profileUser.id)} className="btn-secondary w-full"><UserCircle size={17} /> Remove connection</button>
+          </> : profileConnection?.status === "PENDING" ? <div className="rounded-2xl border bg-stone-50 p-4 text-sm font-semibold text-stone-600 dark:bg-white/5 dark:text-stone-300">
+            {profileConnection.requesterId === user?.id ? "Connection request sent. Private chat unlocks after acceptance." : "This student sent you a connection request."}
+            {profileConnection.receiverId === user?.id && <div className="mt-3 grid grid-cols-2 gap-2"><button onClick={() => updateConnection.mutate({ id: profileConnection.id, status: "ACCEPTED" })} className="rounded-lg bg-moss px-3 py-2 text-xs font-bold text-white">Accept</button><button onClick={() => updateConnection.mutate({ id: profileConnection.id, status: "REJECTED" })} className="rounded-lg border px-3 py-2 text-xs font-bold">Reject</button></div>}
+          </div> : <button onClick={() => requestConnection.mutate(profileUser.id)} className="btn-primary w-full"><UserPlus size={17} /> Send connection request</button>}
           <button onClick={() => setReporting({ userId: profileUser.id })} className="btn-secondary w-full"><Flag size={17} /> Report user</button>
           <button onClick={() => mute.mutate(profileUser.id)} className="btn-secondary w-full"><Bell size={17} /> Mute user</button>
           <button onClick={() => block.mutate(profileUser.id)} className="btn-secondary w-full text-red-600"><Ban size={17} /> Block user</button>

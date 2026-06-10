@@ -20,7 +20,7 @@
 }
 
 .hero-grid {
-  background-image: linear-gradient(rgba(47,107,79,.07) 1px, transparent 1px), linear-gradient(90deg, rgba(47,107,79,.07) 1px, transparent 1px);
+  background-image: linear-gradient(rgba(62, 114, 226, 0.07) 1px, transparent 1px), linear-gradient(90deg, rgba(47,107,79,.07) 1px, transparent 1px);
   background-size: 32px 32px;
 }
 

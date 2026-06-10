@@ -79,6 +79,12 @@ enum CommunityReportStatus {
   DISMISSED
 }
 
+enum CommunityConnectionStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
 enum CommunityChannelType {
   GLOBAL
   LIBRARY
@@ -131,6 +137,8 @@ model User {
   communityMessages     CommunityMessage[]
   communityReactions    CommunityMessageReaction[]
   communityReports      CommunityReport[]      @relation("CommunityReporter")
+  sentConnections       CommunityConnection[]   @relation("ConnectionRequester")
+  receivedConnections   CommunityConnection[]   @relation("ConnectionReceiver")
   blockedUsers          UserBlock[]            @relation("Blocker")
   blockedBy             UserBlock[]            @relation("Blocked")
   mutedUsers            UserMute[]             @relation("Muter")
@@ -494,6 +502,21 @@ model CommunityReport {
   updatedAt  DateTime               @updatedAt
 
   @@index([status, createdAt])
+}
+
+model CommunityConnection {
+  id          String                    @id @default(cuid())
+  requesterId String
+  requester   User                      @relation("ConnectionRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+  receiverId  String
+  receiver    User                      @relation("ConnectionReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+  status      CommunityConnectionStatus @default(PENDING)
+  createdAt   DateTime                  @default(now())
+  updatedAt   DateTime                  @updatedAt
+
+  @@unique([requesterId, receiverId])
+  @@index([receiverId, status])
+  @@index([requesterId, status])
 }
 
 model UserBlock {

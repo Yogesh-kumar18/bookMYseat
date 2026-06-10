@@ -95,7 +95,24 @@ async function canAccessChannel(userId: string, channelId: string) {
   if (!channel) return null;
   if (channel.type === "GLOBAL") return channel;
   const member = await prisma.communityChannelMember.findUnique({ where: { channelId_userId: { channelId, userId } } });
-  return member && !member.isRemoved && !member.isBanned ? channel : null;
+  if (!member || member.isRemoved || member.isBanned) return null;
+  if (channel.type === "DIRECT") {
+    const other = await prisma.communityChannelMember.findFirst({ where: { channelId, userId: { not: userId }, isRemoved: false, isBanned: false } });
+    if (!other || !(await acceptedConnection(userId, other.userId))) return null;
+  }
+  return channel;
+}
+
+async function acceptedConnection(userId: string, otherUserId: string) {
+  return prisma.communityConnection.findFirst({
+    where: {
+      status: "ACCEPTED",
+      OR: [
+        { requesterId: userId, receiverId: otherUserId },
+        { requesterId: otherUserId, receiverId: userId }
+      ]
+    }
+  });
 }
 
 app.get("/api/health", (_req, res) => res.json({ status: "ok", service: "bookmyseat-api" }));
@@ -908,10 +925,15 @@ app.get("/api/community/channels", authenticate, allow("STUDENT", "OWNER", "ADMI
     },
     orderBy: { createdAt: "asc" }
   });
-  const channels = await Promise.all(memberships.map(async (membership) => ({
-    ...membership.channel,
-    latestMessage: membership.channel.messages[0] ?? null,
-    unreadCount: await prisma.communityMessage.count({
+  const channels = (await Promise.all(memberships.map(async (membership) => {
+    if (membership.channel.type === "DIRECT") {
+      const other = membership.channel.members.find((member) => member.userId !== req.user!.id);
+      if (!other || !(await acceptedConnection(req.user!.id, other.userId))) return null;
+    }
+    return {
+      ...membership.channel,
+      latestMessage: membership.channel.messages[0] ?? null,
+      unreadCount: await prisma.communityMessage.count({
       where: {
         channelId: membership.channelId,
         senderId: { not: req.user!.id },
@@ -919,7 +941,8 @@ app.get("/api/community/channels", authenticate, allow("STUDENT", "OWNER", "ADMI
         ...(membership.lastReadAt ? { createdAt: { gt: membership.lastReadAt } } : {})
       }
     })
-  })));
+    };
+  }))).filter(Boolean);
   res.json({ channels });
 }));
 
@@ -975,6 +998,7 @@ app.post("/api/community/direct", authenticate, allow("STUDENT", "OWNER", "ADMIN
   if (data.userId === req.user!.id) return res.status(400).json({ message: "You cannot message yourself." });
   const other = await prisma.user.findUnique({ where: { id: data.userId }, select: { id: true, name: true } });
   if (!other) return res.status(404).json({ message: "User not found" });
+  if (!(await acceptedConnection(req.user!.id, other.id))) return res.status(403).json({ message: "Send a connection request first. Private chat opens only after acceptance." });
   const [a, b] = [req.user!.id, other.id].sort();
   const channel = await prisma.communityChannel.upsert({
     where: { id: `direct-${a}-${b}` },
@@ -984,6 +1008,82 @@ app.post("/api/community/direct", authenticate, allow("STUDENT", "OWNER", "ADMIN
   await prisma.communityChannelMember.upsert({ where: { channelId_userId: { channelId: channel.id, userId: req.user!.id } }, create: { channelId: channel.id, userId: req.user!.id }, update: { isRemoved: false, isBanned: false } });
   await prisma.communityChannelMember.upsert({ where: { channelId_userId: { channelId: channel.id, userId: other.id } }, create: { channelId: channel.id, userId: other.id }, update: { isRemoved: false, isBanned: false } });
   res.status(201).json(channel);
+}));
+
+app.get("/api/community/connections", authenticate, allow("STUDENT", "OWNER", "ADMIN"), asyncRoute(async (req, res) => {
+  const connections = await prisma.communityConnection.findMany({
+    where: { OR: [{ requesterId: req.user!.id }, { receiverId: req.user!.id }] },
+    include: {
+      requester: { select: { id: true, name: true, role: true } },
+      receiver: { select: { id: true, name: true, role: true } }
+    },
+    orderBy: { updatedAt: "desc" }
+  });
+  res.json({ connections });
+}));
+
+app.post("/api/community/connections", authenticate, allow("STUDENT", "OWNER", "ADMIN"), asyncRoute(async (req, res) => {
+  const data = z.object({ userId: z.string() }).parse(req.body);
+  if (data.userId === req.user!.id) return res.status(400).json({ message: "You cannot connect with yourself." });
+  const [requester, receiver] = await Promise.all([
+    prisma.user.findUnique({ where: { id: req.user!.id }, select: { id: true, name: true } }),
+    prisma.user.findUnique({ where: { id: data.userId }, select: { id: true, name: true } })
+  ]);
+  if (!receiver) return res.status(404).json({ message: "User not found" });
+  const blocked = await prisma.userBlock.findFirst({
+    where: {
+      OR: [
+        { blockerId: req.user!.id, blockedId: receiver.id },
+        { blockerId: receiver.id, blockedId: req.user!.id }
+      ]
+    }
+  });
+  if (blocked) return res.status(403).json({ message: "Connection is unavailable." });
+
+  const reverse = await prisma.communityConnection.findUnique({ where: { requesterId_receiverId: { requesterId: receiver.id, receiverId: req.user!.id } } });
+  if (reverse) {
+    if (reverse.status === "PENDING") return res.json(await prisma.communityConnection.update({ where: { id: reverse.id }, data: { status: "ACCEPTED" } }));
+    if (reverse.status === "ACCEPTED") return res.json(reverse);
+  }
+  const connection = await prisma.communityConnection.upsert({
+    where: { requesterId_receiverId: { requesterId: req.user!.id, receiverId: receiver.id } },
+    create: { requesterId: req.user!.id, receiverId: receiver.id },
+    update: { status: "PENDING" }
+  });
+  await prisma.notification.create({
+    data: {
+      userId: receiver.id,
+      type: "SYSTEM",
+      entityId: connection.id,
+      actionPath: "/community",
+      title: "New connection request",
+      message: `${requester?.name || "A student"} wants to connect before private chat.`
+    }
+  });
+  res.status(201).json(connection);
+}));
+
+app.patch("/api/community/connections/:id", authenticate, allow("STUDENT", "OWNER", "ADMIN"), asyncRoute(async (req, res) => {
+  const data = z.object({ status: z.enum(["ACCEPTED", "REJECTED"]) }).parse(req.body);
+  const connection = await prisma.communityConnection.findFirst({ where: { id: String(req.params.id), receiverId: req.user!.id } });
+  if (!connection) return res.status(404).json({ message: "Connection request not found" });
+  res.json(await prisma.communityConnection.update({ where: { id: connection.id }, data }));
+}));
+
+app.delete("/api/community/connections/:userId", authenticate, allow("STUDENT", "OWNER", "ADMIN"), asyncRoute(async (req, res) => {
+  const otherUserId = String(req.params.userId);
+  const connections = await prisma.communityConnection.findMany({
+    where: {
+      OR: [
+        { requesterId: req.user!.id, receiverId: otherUserId },
+        { requesterId: otherUserId, receiverId: req.user!.id }
+      ]
+    }
+  });
+  await prisma.communityConnection.deleteMany({ where: { id: { in: connections.map((item) => item.id) } } });
+  const [a, b] = [req.user!.id, otherUserId].sort();
+  await prisma.communityChannel.delete({ where: { id: `direct-${a}-${b}` } }).catch(() => undefined);
+  res.json({ removed: true });
 }));
 
 app.post("/api/community/messages/:id/reactions", authenticate, allow("STUDENT", "OWNER", "ADMIN"), asyncRoute(async (req, res) => {
@@ -1010,6 +1110,16 @@ app.post("/api/community/block/:userId", authenticate, allow("STUDENT", "OWNER",
   const blockedId = String(req.params.userId);
   if (blockedId === req.user!.id) return res.status(400).json({ message: "You cannot block yourself." });
   await prisma.userBlock.upsert({ where: { blockerId_blockedId: { blockerId: req.user!.id, blockedId } }, create: { blockerId: req.user!.id, blockedId }, update: {} });
+  await prisma.communityConnection.deleteMany({
+    where: {
+      OR: [
+        { requesterId: req.user!.id, receiverId: blockedId },
+        { requesterId: blockedId, receiverId: req.user!.id }
+      ]
+    }
+  });
+  const [a, b] = [req.user!.id, blockedId].sort();
+  await prisma.communityChannel.delete({ where: { id: `direct-${a}-${b}` } }).catch(() => undefined);
   res.status(201).json({ blocked: true });
 }));
 

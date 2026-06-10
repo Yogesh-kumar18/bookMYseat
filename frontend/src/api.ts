@@ -22,6 +22,11 @@ export type Library = {
 
 export type CommunityMessageType = "TEXT" | "VACANCY" | "CURRENT_AFFAIRS" | "EXAM_UPDATE" | "NOTE" | "FILE";
 export type CommunityMember = { id: string; userId: string; user: { id: string; name: string; role: Role } };
+export type CommunityConnection = {
+  id: string; requesterId: string; receiverId: string; status: "PENDING" | "ACCEPTED" | "REJECTED";
+  requester: { id: string; name: string; role: Role }; receiver: { id: string; name: string; role: Role };
+  createdAt: string; updatedAt: string;
+};
 export type CommunityChannel = {
   id: string; type: "GLOBAL" | "LIBRARY" | "DIRECT"; name: string; description?: string; libraryId?: string;
   members?: CommunityMember[]; latestMessage?: CommunityMessage | null; unreadCount?: number;
